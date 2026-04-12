@@ -409,7 +409,7 @@ function computeAllOverlaps(fixes: readonly NodeFix[]): OverlapCenter[] {
  * Find which room a 2D point is inside. Returns the room's id/name,
  * or null if the point isn't in any defined room. Uses ray-casting.
  */
-function findRoom(
+export function findRoom(
   rooms: readonly Room[],
   point: readonly [number, number],
 ): string | null {

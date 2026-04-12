@@ -14,25 +14,22 @@ export default function CompareLegend() {
   const { compareMode } = useMapTool();
   if (!compareMode) return null;
 
-  // Display order: active first, then each base locator.
+  // Active first; then derive everything else from LOCATOR_LABELS so adding
+  // a new locator only requires updating locatorColors.ts.
+  const ACTIVE = "room_aware";
   const entries: Array<{ key: string; label: string; color: string }> = [
     {
-      key: "room_aware",
-      label: `${LOCATOR_LABELS.room_aware} (active)`,
-      color: LOCATOR_COLORS.room_aware,
+      key: ACTIVE,
+      label: `${LOCATOR_LABELS[ACTIVE]} (active)`,
+      color: LOCATOR_COLORS[ACTIVE],
     },
-    {
-      key: "nadaraya_watson",
-      label: LOCATOR_LABELS.nadaraya_watson,
-      color: LOCATOR_COLORS.nadaraya_watson,
-    },
-    {
-      key: "nelder_mead",
-      label: LOCATOR_LABELS.nelder_mead,
-      color: LOCATOR_COLORS.nelder_mead,
-    },
-    { key: "bfgs", label: LOCATOR_LABELS.bfgs, color: LOCATOR_COLORS.bfgs },
-    { key: "mle", label: LOCATOR_LABELS.mle, color: LOCATOR_COLORS.mle },
+    ...Object.keys(LOCATOR_LABELS)
+      .filter((k) => k !== ACTIVE)
+      .map((k) => ({
+        key: k,
+        label: LOCATOR_LABELS[k],
+        color: LOCATOR_COLORS[k],
+      })),
   ];
 
   return (

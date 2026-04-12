@@ -52,8 +52,11 @@ export function buildLocator(config: Config): LocatorBundle {
   const mle = new OutlierRejectingLocator(new MLELocator());
   // nearest_node is intentionally NOT outlier-wrapped — its whole point
   // as a baseline is "what does the trivial heuristic say", and outlier
-  // rejection would defeat that comparison.
-  const nearest = new NearestNodeLocator();
+  // rejection would defeat that comparison. Reports the room centroid of
+  // the nearest-reporting node, which is the most honest single-point
+  // summary of the only signal it actually has ("device is in this room").
+  const allRooms = config.floors.flatMap((f) => f.rooms);
+  const nearest = new NearestNodeLocator(allRooms, config.nodes);
   const allBases: Locator[] = [idw, nm, bfgs, mle, nearest];
 
   // Room-aware circle-overlap locator. Uses the room topology (where
@@ -62,7 +65,6 @@ export function buildLocator(config: Config): LocatorBundle {
   // are accurate. Cross-wall pairs are distorted → down-weighted.
   // Finds the position from the weighted centroid of pairwise overlap
   // centers, iterating to refine which room the device is in.
-  const allRooms = config.floors.flatMap((f) => f.rooms);
   const active = new RoomAwareLocator(allRooms, config.nodes);
 
   return { active, alternatives: allBases };

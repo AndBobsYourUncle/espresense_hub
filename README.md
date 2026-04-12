@@ -84,7 +84,7 @@ Locators currently rendered:
 | **Nelder-Mead** | cyan | Simplex optimization on the squared-distance residual. |
 | **BFGS** | emerald | Quasi-Newton gradient descent on the same residual. |
 | **MLE** | pink | Maximum-likelihood estimation under a Gaussian noise model. |
-| **Nearest Node** | amber | Returns the position of whichever node reported the smallest distance. Trivial baseline — useful for "is the fancy locator actually doing better than the dumbest possible heuristic?" |
+| **Nearest Node** | amber | Picks the node reporting the smallest distance and places the marker at the *centroid of that node's room* — a faithful "device is somewhere in this room" baseline rather than pretending to know exact coordinates. |
 
 That's a complete superset of the upstream companion's per-floor base locators (`nadaraya_watson`, `nelder_mead`, `bfgs`, `mle`, `nearest_node`). The companion's `multi_floor` isn't a separate algorithm in our model — our locators are 3D-native and select the floor implicitly from the Z coordinate of the fix.
 
