@@ -302,6 +302,14 @@ export async function PATCH(
     } else {
       deactivatePin(store, deviceId, body.timestamp);
     }
+    // Persist immediately. Especially critical on deactivate — the user
+    // is often deactivating right before a planned restart/redeploy, and
+    // any in-memory bias accumulation since the last periodic flush
+    // would be lost without this. Activate also saves so the state file
+    // reflects truth at every transition.
+    saveDevicePins(store).catch((err) =>
+      console.error("[pin] saveDevicePins failed", err),
+    );
   }
 
   return NextResponse.json({
