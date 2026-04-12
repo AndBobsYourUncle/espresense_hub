@@ -129,6 +129,19 @@ export async function bootstrap(): Promise<void> {
       );
     }, CALIBRATION_SAVE_INTERVAL_MS);
 
+    // Periodic device-pin save — pins accumulate per-(device, node) bias
+    // samples from incoming MQTT messages while a pin is active. Without a
+    // periodic flush, those samples sit in memory and are only persisted on
+    // explicit pin actions (add/delete/activate/deactivate) or graceful
+    // shutdown. A hard kill (or SIGTERM the process can't handle in time)
+    // would lose all accumulation since the last save event. Same cadence
+    // as calibration so the two files stay in rough lockstep.
+    setInterval(() => {
+      saveDevicePins(store).catch((err) =>
+        console.error("[bootstrap] saveDevicePins failed", err),
+      );
+    }, CALIBRATION_SAVE_INTERVAL_MS);
+
     // Best-effort save on graceful shutdown. Node may not always get
     // here (kill -9, OOM) but normal stop signals do.
     const flushAll = async () => {
