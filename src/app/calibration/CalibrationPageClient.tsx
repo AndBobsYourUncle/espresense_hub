@@ -806,17 +806,23 @@ function BiasCell({
   count: number;
   units: "metric" | "imperial";
 }) {
-  if (count === 0) {
-    return <span className="font-mono text-xs text-zinc-300">—</span>;
-  }
+  // Always render the two-line structure even when empty — otherwise the
+  // row height jumps each time a poll flips count between 0 and >0, which
+  // creates noticeable visual reflow in the table on every refresh.
+  // tabular-nums keeps digit widths consistent so the column doesn't
+  // wiggle as values change either.
+  const hasData = count > 0;
   return (
-    <div className="font-mono text-xs leading-tight">
-      <div className="text-zinc-900 dark:text-zinc-100">
-        {mean >= 0 ? "+" : ""}
-        {formatDistanceDisplay(mean, units)}
+    <div className="font-mono text-xs leading-tight tabular-nums">
+      <div className={hasData ? "text-zinc-900 dark:text-zinc-100" : "text-zinc-300"}>
+        {hasData
+          ? `${mean >= 0 ? "+" : ""}${formatDistanceDisplay(mean, units)}`
+          : "—"}
       </div>
       <div className="text-[10px] text-zinc-400">
-        ±{formatDistanceDisplay(stddev, units)} · {count.toLocaleString()}
+        {hasData
+          ? `±${formatDistanceDisplay(stddev, units)} · ${count.toLocaleString()}`
+          : "\u00a0"}
       </div>
     </div>
   );
