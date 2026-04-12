@@ -14,14 +14,121 @@ ESPresense ESP32 nodes scan for BLE devices around your home and publish RSSI re
 - Lets you drop **pins** as ground-truth anchors when a device is at a known location. Pin samples accumulate over time and become per-(device, node) bias corrections that survive restarts.
 - Auto-applies small calibration deltas back to the firmware over MQTT, gated and rate-limited so a bad sample can't run away with your config.
 
-## Why fork?
+## Why a different locator?
 
-The upstream companion is solid, but a few areas were worth rebuilding:
+### The problem with how positioning normally works
 
-- **Per-pair calibration.** The original uses a single absorption value per node. This hub maintains streaming sufficient stats per `(listener, transmitter)` pair, so each path's effective path-loss exponent is learned independently. Walls between two specific nodes don't poison a node's global absorption.
-- **Per-(device, node) bias correction.** The locator was repeatedly off by 3–4 m for a wearable in one specific room — node calibration was perfect, but the device's antenna interaction with that node's geometry was the culprit. Pins solve this by accumulating a multiplicative bias per device/node pair while the device sits at a known anchor. IDW interpolation spreads the correction smoothly across nearby positions.
-- **RoomAware locator.** Combines circle-intersection geometry with GDOP weighting, R²-based pair quality, and a room-graph adjacency model. Nodes in a different room from the device are heavily down-weighted (cross-room ≈ 0.005), so a strong but through-the-wall reading doesn't drag a fix into the wrong space.
+ESPresense nodes turn RSSI (signal strength) into a distance estimate using a path-loss equation. The upstream companion offers several locators (Nadaraya-Watson, Nelder-Mead, BFGS, MLE, nearest-node) — but they all do roughly the same thing under the hood:
+
+> "Given each node's distance estimate to this device, find the (x, y, z) point that best fits all of them at once."
+
+That works fine in an empty parking lot. In a real house it falls apart for a few reasons:
+
+1. **One absorption value per node.** Walls, doors, and furniture attenuate signal. The companion lets you set one `absorption` number per node — but a node's signal to a teammate across a hallway behaves differently than its signal to a teammate through two walls. One number can't be right for both paths.
+2. **No notion of which walls matter.** A node hearing a device through three walls reports a number, but that number is wildly less reliable than one in the same room. The optimizer doesn't know that — it just throws everything into the same least-squares fit. A loud-but-wrong reading from the wrong room can yank the fix sideways.
+3. **No knowledge of the device.** Body shadow, antenna orientation, what room the device usually sits in — none of that is modeled. A watch on someone's wrist behaves very differently from a phone on a table, but the locator treats both the same.
+4. **Outliers leak in.** A reflected signal that arrives "too soon" produces an artificially-short distance, and the optimizer happily absorbs it. There's no good way to say "this measurement is suspicious — down-weight it".
+
+The result is a position that's "kind of right on average" but jumps around a lot, and tends to drift into the wrong room when a single noisy node dominates a fix.
+
+### What this hub does differently
+
+Three changes that compound:
+
+**1. Each *pair* of nodes learns its own path loss, online, forever.**
+
+Instead of one absorption number per node, the hub maintains streaming statistics for every `(listener, transmitter)` pair — exponentially time-decayed so old data fades and new data takes over smoothly. The path from node A to node B has its own path-loss exponent, separate from A→C or A→D. Walls between A and B don't poison node A's view of node C.
+
+This data is collected for free: nodes constantly hear *each other*, and we know the true distance between any two stationary nodes from the config. Every measurement between a node pair is a free calibration sample — no manual tape-measuring required after initial setup.
+
+**2. The room graph downweights through-wall measurements.**
+
+Each measurement comes with a weight based on the room relationship between the listener and the device's likely room:
+
+- **Same room** → weight 1.0 (full trust).
+- **Adjacent room** (door / open passage) → weight 0.8 (somewhat trusted).
+- **Cross-room** (separated by one or more walls with no declared opening) → weight 0.005 (almost ignored).
+
+The device's "likely room" is decided by a weighted vote of the *closest-reporting* nodes, not from the position estimate. That avoids a chicken-and-egg trap where a wrong initial guess picks the wrong room and then keeps confirming itself.
+
+In practice this means a noisy through-wall reading from a strong but distant node can't drag a fix out of the room it actually belongs in. The geometry of the home becomes part of the math.
+
+**3. Per-(device, node) bias correction via pins.**
+
+Even with perfect node calibration, the locator was systematically off by 3–4 m for one specific watch in one specific room. The cause turned out to be the watch's antenna interacting with that node's geometry — body shadow, orientation, wrist position. There is no global setting that fixes this; it's a property of *that device on that user in that room*.
+
+Pins solve it. When you know a device is at a specific spot — your bedside table, your couch — you drop a pin on the map. While the device sits there (motion detection auto-deactivates), every measurement is recorded as a ground-truth sample: "node X reported distance Y, true distance was Z". A multiplicative bias accumulates per (device, node) pair. As you drop pins around the house for a device you care about, the system builds a spatial map of how that device's signal behaves at each node, and IDW-interpolates the correction smoothly to positions in between. The bias data persists across restarts, so the calibration only gets better with use.
+
+For any device you don't pin, the system falls back gracefully to the per-pair calibration — no worse than the upstream behavior.
+
+### Why these layer well together
+
+The three are independent improvements that stack:
+
+- Per-pair calibration handles environmental attenuation between pairs of *nodes*.
+- Room weighting handles which measurements to trust *now*, given the geometry of the home.
+- Pin biases handle *device-specific* effects that no node-side calibration can model.
+
+Each one alone helps. Together they give a system that improves slowly and continuously while you live in the house — no recalibration ritual, no tape measure, no per-device tuning. Drop a pin when you notice your watch always reads as "wrong room"; the next day it's fixed.
+
+### Other improvements
+
+- **GDOP-aware confidence.** The position confidence score actually reflects whether the listener geometry around the device is good (well-distributed → low GDOP, high confidence) or poor (all listeners on one side → high GDOP, low confidence). The UI shows this breakdown.
+- **R² weighting.** Pairs with a strong fit (low residual variance, lots of samples) get more weight in solves than pairs with a noisy fit.
+- **Auto-applied calibration.** Small drift corrections are pushed back to nodes over MQTT every 5 min, gated and rate-limited so a bad sample window can't run away with your config. The audit log on the calibration page shows every push.
 - **Modern stack.** Next.js (App Router), React 19, Tailwind 4, Zod schemas — type-safe end to end, hot-reloads while you tune.
+
+## Getting the most out of it
+
+A rough order of operations to dial in a fresh install:
+
+### 1. Get the rooms right first
+
+The room graph is foundational — if the locator doesn't know that your kitchen and dining room are open to each other, it will incorrectly suppress measurements that actually should be trusted. Spend the time on this *before* obsessing over node positions.
+
+- Draw room polygons in `config.yaml` matching your floor plan as closely as you can. Exact corner coordinates beat approximations because the auto-edge-detection only fires when polygon edges share endpoints exactly.
+- For open-plan zones (kitchen/living/dining), tag each room with the same `floor_area` string. They become all-mutually-adjacent in one stroke.
+- For doorways between otherwise-walled rooms, declare `open_to:` between them. Bidirectional — only one side needs to declare it.
+- Solid walls between rooms? Don't declare anything. The cross-room weight (0.005) is the right model.
+
+### 2. Place nodes accurately
+
+The X, Y, Z of each node directly drives the per-pair calibration baseline (distance between A and B is computed from these). An error of 30 cm in node placement is an error of 30 cm in every truth distance the calibration sees. Use a tape measure or LiDAR scan if you have one.
+
+The map editor has a wall/corner snapping mode for entering positions relative to a wall edge — usually easier than measuring in absolute floor coordinates.
+
+### 3. Let it run
+
+The first hour of MQTT traffic populates initial per-pair fits. After about two hours of accumulation:
+
+- Open `/calibration`. Each node should show a row with non-zero `LOO bias` (leave-one-out residual). A green dot means the node is well-calibrated against its peers.
+- The auto-apply system starts pushing absorption corrections after the first 5 min cycle, rate-limited to once per node per 10 min. The audit panel shows what fired.
+- If a node is consistently red (large bias), check its position. The most common cause is a 1–2 m error in the configured XYZ.
+
+### 4. Pin your stationary devices
+
+For each wearable or phone you care about positioning accurately:
+
+- Select the device in the map UI.
+- Switch to the pin tool and **shift+click** on the map at the device's actual location (e.g., your desk, your bedside table).
+- The pin lights up and starts accumulating samples while the device is stationary. Motion auto-deactivates it.
+- After a few minutes, that pin will have a few hundred samples and the per-(device, node) bias for nearby nodes will be well-calibrated.
+
+Drop 3–5 pins around your home for the same device — the bias map gets richer and IDW interpolation handles positions in between. A single watch with pins at your bed, couch, desk, and dining table covers most of your day-to-day positioning needs.
+
+### 5. Re-pin when things change
+
+If you rearrange furniture, replace a node, or move a device's typical resting spot, the existing pins for that area become slightly stale. Drop a new pin at the new spot — the streaming bias accumulator gives the recent samples more weight, and old data fades. No reset needed.
+
+### 6. Watch for systematic outliers
+
+A single node with persistently red `GT bias` (ground-truth bias) usually means one of:
+
+- Wrong physical position in `config.yaml` (most common).
+- A wall or large object that wasn't there when you set up the floor plan.
+- A failing antenna or a node behind metal (rare but possible).
+
+The calibration page lets you click a row to see the per-pair breakdown — useful for spotting whether the bias is uniform (probably node placement) or directional (probably an obstruction in one specific direction).
 
 ## Getting started
 
