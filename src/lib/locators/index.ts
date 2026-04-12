@@ -5,6 +5,7 @@ import { getStore, type DeviceState } from "@/lib/state/store";
 import { BFGSLocator } from "./bfgs";
 import { MLELocator } from "./mle";
 import { NadarayaWatsonLocator } from "./nadaraya_watson";
+import { NearestNodeLocator } from "./nearest_node";
 import { NelderMeadLocator } from "./nelder_mead";
 import { OutlierRejectingLocator } from "./outlier";
 import { RoomAwareLocator } from "./room_aware";
@@ -49,7 +50,11 @@ export function buildLocator(config: Config): LocatorBundle {
   const nm = new OutlierRejectingLocator(new NelderMeadLocator());
   const bfgs = new OutlierRejectingLocator(new BFGSLocator());
   const mle = new OutlierRejectingLocator(new MLELocator());
-  const allBases: Locator[] = [idw, nm, bfgs, mle];
+  // nearest_node is intentionally NOT outlier-wrapped — its whole point
+  // as a baseline is "what does the trivial heuristic say", and outlier
+  // rejection would defeat that comparison.
+  const nearest = new NearestNodeLocator();
+  const allBases: Locator[] = [idw, nm, bfgs, mle, nearest];
 
   // Room-aware circle-overlap locator. Uses the room topology (where
   // walls are) to decide which measurements to trust. Same-room node

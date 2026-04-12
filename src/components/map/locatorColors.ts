@@ -9,6 +9,7 @@ export const LOCATOR_COLORS: Record<string, string> = {
   nelder_mead: "#22d3ee", // cyan-400
   bfgs: "#34d399", // emerald-400
   mle: "#f472b6", // pink-400
+  nearest_node: "#fbbf24", // amber-400
   room_aware: "#f97316", // orange-500 (the active marker)
 };
 
@@ -17,6 +18,7 @@ export const LOCATOR_LABELS: Record<string, string> = {
   nelder_mead: "Nelder-Mead",
   bfgs: "BFGS",
   mle: "MLE",
+  nearest_node: "Nearest",
   room_aware: "Room-Aware",
 };
 

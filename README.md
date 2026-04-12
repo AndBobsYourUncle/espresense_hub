@@ -71,6 +71,25 @@ The three are independent improvements that stack:
 
 Each one alone helps. Together they give a system that improves slowly and continuously while you live in the house — no recalibration ritual, no tape measure, no per-device tuning. Drop a pin when you notice your watch always reads as "wrong room"; the next day it's fixed.
 
+### Compare mode
+
+The map UI has a side-by-side compare mode that runs every locator on the *same* live measurement set and shows each one's position as a colored ghost marker. Useful for sanity-checking RoomAware against the alternatives, and for understanding why one algorithm pulls left while another pulls right.
+
+Locators currently rendered:
+
+| Locator | Color | What it does |
+|---|---|---|
+| **Room-Aware** (active) | orange | Circle-intersection geometry + GDOP + R² + room-graph weighting + per-(device, node) bias correction. The default. |
+| **IDW** (nadaraya_watson) | violet | Inverse-distance² weighted average of node positions. Closed-form, no iteration. The companion's default. |
+| **Nelder-Mead** | cyan | Simplex optimization on the squared-distance residual. |
+| **BFGS** | emerald | Quasi-Newton gradient descent on the same residual. |
+| **MLE** | pink | Maximum-likelihood estimation under a Gaussian noise model. |
+| **Nearest Node** | amber | Returns the position of whichever node reported the smallest distance. Trivial baseline — useful for "is the fancy locator actually doing better than the dumbest possible heuristic?" |
+
+That's a complete superset of the upstream companion's per-floor base locators (`nadaraya_watson`, `nelder_mead`, `bfgs`, `mle`, `nearest_node`). The companion's `multi_floor` isn't a separate algorithm in our model — our locators are 3D-native and select the floor implicitly from the Z coordinate of the fix.
+
+All non-baseline locators are wrapped in an outlier-rejection layer that drops measurements with extreme residuals against an initial fit before solving again. `nearest_node` is intentionally left raw so the comparison shows the trivial heuristic's actual behavior.
+
 ### Other improvements
 
 - **GDOP-aware confidence.** The position confidence score actually reflects whether the listener geometry around the device is good (well-distributed → low GDOP, high confidence) or poor (all listeners on one side → high GDOP, low confidence). The UI shows this breakdown.
