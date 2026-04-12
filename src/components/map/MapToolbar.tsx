@@ -33,10 +33,13 @@ const TOOLS: ToolDef[] = [
 ];
 
 /**
- * Floating toolbar at the top-left of the map. Tool buttons (Inspect /
- * Ruler) are mutually exclusive; the Compare toggle on the right is
- * independent — it overlays raw-locator ghost markers on top of the
- * path-aware results so the user can visually see the delta.
+ * Toolbar shown above the map in its own static row. Renders outside the
+ * MapStage so it stays anchored — the rest of the map UI (panels, legends)
+ * is draggable and can be moved out of the way, but tool selection should
+ * always be in the same place. Tool buttons (Inspect / Ruler / Pin) are
+ * mutually exclusive; the Compare toggle on the right is independent — it
+ * overlays raw-locator ghost markers on top of the active locator's
+ * results so the user can visually see the delta.
  */
 export default function MapToolbar() {
   const { activeTool, setActiveTool, compareMode, setCompareMode } =
@@ -44,8 +47,7 @@ export default function MapToolbar() {
 
   return (
     <div
-      onClick={(e) => e.stopPropagation()}
-      className="absolute top-4 left-4 z-10 inline-flex items-center gap-0.5 p-1 rounded-lg bg-white/95 dark:bg-zinc-950/95 backdrop-blur border border-zinc-200 dark:border-zinc-800 shadow-sm"
+      className="shrink-0 inline-flex items-center gap-0.5 p-1 rounded-lg bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 shadow-sm self-start"
       role="toolbar"
       aria-label="Map tools"
     >

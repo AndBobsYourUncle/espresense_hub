@@ -94,22 +94,24 @@ export default async function MapPage() {
   return (
     <>
       <PageHeader title="Map" description={summary} />
-      <main className="flex-1 min-h-0 p-6">
+      <main className="flex-1 min-h-0 p-6 flex flex-col gap-3">
         {floor ? (
           <DeviceSelectionProvider>
             <RulerProvider>
               <NodeEditProvider>
                 <MapToolProvider>
                   <PinHighlightProvider>
-                    <MapStage>
-                      <FloorPlan config={config} floor={floor} />
-                      <MapToolbar />
-                      <CompareLegend />
-                      <DeviceDetailPanel />
-                      <NodeInspectionPanel nodes={floorNodes} />
-                      <RulerPanel nodes={floorNodes} />
-                      <NodeEditPanel nodes={floorNodes} />
-                    </MapStage>
+                    <MapToolbar />
+                    <div className="flex-1 min-h-0">
+                      <MapStage>
+                        <FloorPlan config={config} floor={floor} />
+                        <CompareLegend />
+                        <DeviceDetailPanel />
+                        <NodeInspectionPanel nodes={floorNodes} />
+                        <RulerPanel nodes={floorNodes} />
+                        <NodeEditPanel nodes={floorNodes} />
+                      </MapStage>
+                    </div>
                   </PinHighlightProvider>
                 </MapToolProvider>
               </NodeEditProvider>

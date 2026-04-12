@@ -426,7 +426,7 @@ export function findRoom(
  * Ray-casting point-in-polygon test. Standard algorithm: cast a ray
  * from the point along +x, count edge crossings. Odd = inside.
  */
-function pointInPolygon(
+export function pointInPolygon(
   point: readonly [number, number],
   polygon: readonly (readonly [number, number])[],
 ): boolean {

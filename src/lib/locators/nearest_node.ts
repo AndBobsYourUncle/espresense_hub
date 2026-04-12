@@ -1,5 +1,5 @@
 import type { Node, Room } from "@/lib/config";
-import { findRoom } from "./room_aware";
+import { findRoom, pointInPolygon } from "./room_aware";
 import type { Locator, LocatorResult, NodeFix } from "./types";
 
 /**
@@ -52,25 +52,36 @@ export class NearestNodeLocator implements Locator {
         }
       }
 
-      if (!room || !room.points || room.points.length === 0) continue;
+      if (!room || !room.points || room.points.length < 3) continue;
 
-      // Polygon centroid: simple arithmetic mean of vertices. Good enough
-      // for the convex-ish room shapes this system targets, and stays
-      // well inside U-shapes where a true centroid-of-area might escape
-      // the polygon.
-      let sx = 0;
-      let sy = 0;
-      for (const [x, y] of room.points) {
-        sx += x;
-        sy += y;
+      // Use the polygon's true area centroid (shoelace formula). Each
+      // edge contributes weighted by the signed area it sweeps out, so
+      // a long flat wall doesn't get out-voted by a short bumpy one
+      // densely vertexed in the corner. This is the right "center of
+      // the blob" rather than "average of the corners".
+      const [cx, cy] = polygonCentroid(room.points);
+
+      // For non-convex polygons (U- or L-shapes) the area centroid can
+      // land outside the polygon. If that happens, fall back to the
+      // simple vertex mean — not perfect, but always inside the convex
+      // hull and well-defined.
+      let centerX = cx;
+      let centerY = cy;
+      if (!pointInPolygon([cx, cy], room.points)) {
+        let sx = 0;
+        let sy = 0;
+        for (const [x, y] of room.points) {
+          sx += x;
+          sy += y;
+        }
+        centerX = sx / room.points.length;
+        centerY = sy / room.points.length;
       }
-      const cx = sx / room.points.length;
-      const cy = sy / room.points.length;
 
       // Z: keep the node's own height — we have no per-room ceiling info
       // here and the node's mounting height is the best available proxy
       // for "where in this room is RF activity happening".
-      this.nodeRoomCentroid.set(n.id, [cx, cy, n.point[2]]);
+      this.nodeRoomCentroid.set(n.id, [centerX, centerY, n.point[2]]);
     }
   }
 
@@ -101,4 +112,50 @@ export class NearestNodeLocator implements Locator {
       algorithm: this.name,
     };
   }
+}
+
+/**
+ * Polygon centroid via the shoelace formula. Works for any simple
+ * (non-self-intersecting) polygon — vertex order can be CW or CCW;
+ * we divide by signed area so the sign cancels.
+ *
+ * For a polygon (x_0, y_0)..(x_{n-1}, y_{n-1}) closing back to (x_0, y_0):
+ *   A = ½ Σ (x_i · y_{i+1} − x_{i+1} · y_i)
+ *   Cx = (1 / 6A) Σ (x_i + x_{i+1}) · (x_i · y_{i+1} − x_{i+1} · y_i)
+ *   Cy = (1 / 6A) Σ (y_i + y_{i+1}) · (x_i · y_{i+1} − x_{i+1} · y_i)
+ *
+ * Degenerate (zero-area) input falls through to the vertex mean to
+ * avoid a divide-by-zero — caller should guard with a points.length
+ * check anyway.
+ */
+function polygonCentroid(
+  points: readonly (readonly [number, number])[],
+): [number, number] {
+  const n = points.length;
+  let twiceA = 0;
+  let cx = 0;
+  let cy = 0;
+
+  for (let i = 0; i < n; i++) {
+    const [xi, yi] = points[i];
+    const [xj, yj] = points[(i + 1) % n];
+    const cross = xi * yj - xj * yi;
+    twiceA += cross;
+    cx += (xi + xj) * cross;
+    cy += (yi + yj) * cross;
+  }
+
+  if (Math.abs(twiceA) < 1e-9) {
+    // Degenerate polygon — fall back to vertex mean.
+    let sx = 0;
+    let sy = 0;
+    for (const [x, y] of points) {
+      sx += x;
+      sy += y;
+    }
+    return [sx / n, sy / n];
+  }
+
+  const sixA = 3 * twiceA;
+  return [cx / sixA, cy / sixA];
 }
