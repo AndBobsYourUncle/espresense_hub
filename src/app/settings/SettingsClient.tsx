@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, Check, FileText, Loader2, Save } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  FileText,
+  Loader2,
+  RefreshCw,
+  Save,
+} from "lucide-react";
 
 interface LoadResponse {
   configPath?: string;
@@ -25,6 +32,7 @@ type Status =
   | { kind: "loading" }
   | { kind: "saving" }
   | { kind: "saved"; bytes: number; liveReloadOk: boolean; note?: string }
+  | { kind: "restarting" }
   | { kind: "error"; message: string };
 
 export default function SettingsClient() {
@@ -98,6 +106,55 @@ export default function SettingsClient() {
     setStatus({ kind: "idle" });
   };
 
+  const restart = async () => {
+    if (
+      !confirm(
+        "Restart the service? This will briefly drop the connection while it comes back up.",
+      )
+    ) {
+      return;
+    }
+    setStatus({ kind: "restarting" });
+    try {
+      const res = await fetch("/api/restart", { method: "POST" });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) {
+        setStatus({
+          kind: "error",
+          message: data.error ?? `Restart failed (${res.status})`,
+        });
+        return;
+      }
+      // Poll a lightweight endpoint until it answers — that's our cue
+      // the new process is up. Then reload the page so the UI is fresh.
+      const start = Date.now();
+      const poll = async (): Promise<void> => {
+        if (Date.now() - start > 30_000) {
+          setStatus({
+            kind: "error",
+            message:
+              "Service didn't come back within 30 s — check journalctl.",
+          });
+          return;
+        }
+        try {
+          const ping = await fetch("/api/config", { cache: "no-store" });
+          if (ping.ok) {
+            window.location.reload();
+            return;
+          }
+        } catch {
+          // fetch throws while the server is down — keep polling.
+        }
+        setTimeout(poll, 500);
+      };
+      // Wait a moment for systemd to actually take it down before polling.
+      setTimeout(poll, 1500);
+    } catch (err) {
+      setStatus({ kind: "error", message: (err as Error).message });
+    }
+  };
+
   // Cmd/Ctrl+S to save.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -140,6 +197,24 @@ export default function SettingsClient() {
               Revert
             </button>
           )}
+          <button
+            type="button"
+            onClick={restart}
+            disabled={
+              status.kind === "saving" ||
+              status.kind === "loading" ||
+              status.kind === "restarting"
+            }
+            className="h-7 px-2.5 inline-flex items-center gap-1.5 rounded-md text-xs font-medium border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Restart the service (required for MQTT/bootstrap config changes)"
+          >
+            {status.kind === "restarting" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            Restart
+          </button>
           <button
             type="button"
             onClick={save}

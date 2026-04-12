@@ -103,6 +103,7 @@ sudo journalctl -u espresense-hub --since "1 hour ago"
 sudo systemctl stop espresense-hub
 sudo systemctl disable espresense-hub
 sudo rm /etc/systemd/system/espresense-hub.service
+sudo rm /etc/sudoers.d/espresense-hub
 sudo systemctl daemon-reload
 sudo rm -rf /opt/espresense-hub                  # or wherever you cloned
 # Keep state, or nuke it:
