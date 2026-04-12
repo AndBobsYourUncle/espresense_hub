@@ -39,3 +39,15 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# user-supplied runtime config (keep config.example.yaml checked in)
+/config.yaml
+
+# runtime state — accumulated calibration & device pin data, written by
+# the server next to config.yaml. Should never be committed.
+/calibration.json
+/calibration.json.tmp
+/devices.json
+/devices.json.tmp
+
+/.claude/settings.local.json

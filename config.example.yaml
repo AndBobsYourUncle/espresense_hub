@@ -1,0 +1,107 @@
+# Example ESPresense Hub configuration.
+#
+# Copy to config.yaml and edit for your home, or set ESPRESENSE_CONFIG_PATH to
+# point somewhere else. Format is compatible with ESPresense-companion's
+# config.yaml, so an existing file can be dropped in unchanged.
+
+mqtt:
+  host: mqtt.local
+  port: 1883
+  ssl: false
+  username: espresense
+  password: changeme
+  discovery_topic: homeassistant
+
+gps:
+  latitude: 38.897957
+  longitude: -77.036560
+  elevation: 15
+  rotation: 0
+  report: false
+
+map:
+  flip_x: false
+  flip_y: true
+  wall_thickness: 0.15
+  wall_color: "#888"
+  wall_opacity: 0.35
+
+timeout: 30
+away_timeout: 120
+device_retention: 30d
+
+optimization:
+  enabled: true
+  optimizer: per_node_absorption
+  interval_secs: 3600
+
+locators:
+  nadaraya_watson:
+    enabled: true
+    bandwidth: 0.5
+    kernel: gaussian
+  nearest_node:
+    enabled: true
+
+filtering:
+  process_noise: 0.01
+  measurement_noise: 0.1
+  max_velocity: 0.5
+  smoothing_weight: 0.7
+
+floors:
+  - name: First Floor
+    bounds:
+      - [0, 0, 0]
+      - [12, 10, 3]
+    rooms:
+      - name: Living Room
+        color: "#1F77B4"
+        points:
+          - [0, 0]
+          - [6, 0]
+          - [6, 5]
+          - [0, 5]
+      - name: Kitchen
+        color: "#FF7F0E"
+        points:
+          - [6, 0]
+          - [12, 0]
+          - [12, 5]
+          - [6, 5]
+      - name: Bedroom
+        color: "#2CA02C"
+        points:
+          - [0, 5]
+          - [6, 5]
+          - [6, 10]
+          - [0, 10]
+      - name: Office
+        color: "#D62728"
+        points:
+          - [6, 5]
+          - [12, 5]
+          - [12, 10]
+          - [6, 10]
+
+nodes:
+  - name: Living Room
+    point: [1.5, 1.5, 1.2]
+    floors: [first_floor]
+  - name: Kitchen
+    point: [10.5, 1.5, 1.2]
+    floors: [first_floor]
+  - name: Bedroom
+    point: [1.5, 8.5, 1.2]
+    floors: [first_floor]
+  - name: Office
+    point: [10.5, 8.5, 1.2]
+    floors: [first_floor]
+
+devices:
+  - name: "*"
+  - id: "tile:*"
+  - id: "iBeacon:*"
+
+exclude_devices:
+  - id: "iBeacon:00000000-0000-0000-0000-000000000000"

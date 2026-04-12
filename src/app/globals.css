@@ -3,6 +3,18 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* Floor plan colors */
+  --map-surface: #ffffff;
+  --map-label: #1f2937;
+  --map-node-fill: #2563eb;
+  --map-node-stroke: #ffffff;
+  --map-node-label: #1e3a8a;
+  --map-device-fill: #f97316;
+  --map-device-stroke: #ffffff;
+  --map-device-label: #9a3412;
+  --map-room-opacity: 0.45;
+  --map-room-opacity-hover: 0.75;
 }
 
 @theme inline {
@@ -16,11 +28,136 @@
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+
+    --map-surface: #0a0a0a;
+    --map-label: #e4e4e7;
+    --map-node-fill: #60a5fa;
+    --map-node-stroke: #0a0a0a;
+    --map-node-label: #bfdbfe;
+    --map-device-fill: #fb923c;
+    --map-device-stroke: #0a0a0a;
+    --map-device-label: #fed7aa;
+    --map-room-opacity: 0.28;
+    --map-room-opacity-hover: 0.6;
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Floor plan.
+   CSS wins over SVG presentation attributes, so fill/stroke set here
+   override any matching attributes on the element. */
+.fp-room {
+  fill-opacity: var(--map-room-opacity);
+  transition: fill-opacity 140ms ease;
+  cursor: pointer;
+}
+.fp-room:hover {
+  fill-opacity: var(--map-room-opacity-hover);
+}
+.fp-room-label {
+  fill: var(--map-label);
+}
+.fp-node {
+  fill: var(--map-node-fill);
+  stroke: var(--map-node-stroke);
+  transition: filter 140ms ease;
+  cursor: pointer;
+}
+.fp-node:hover {
+  filter: drop-shadow(0 0 0.2px rgba(59, 130, 246, 0.7));
+}
+.fp-node-label {
+  fill: var(--map-node-label);
+  stroke: var(--map-surface);
+  stroke-width: 0.07;
+  stroke-linejoin: round;
+  paint-order: stroke;
+}
+
+/* Device markers (live, polled). Smooth transform transitions on the
+   wrapping <g> so dots glide between updates instead of teleporting. */
+.fp-device {
+  transition: transform 600ms cubic-bezier(0.4, 0, 0.2, 1);
+  animation: fp-device-in 250ms ease-out;
+}
+@keyframes fp-device-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.fp-device-dot {
+  fill: var(--map-device-fill);
+  stroke: var(--map-device-stroke);
+  cursor: pointer;
+}
+.fp-device-label {
+  fill: var(--map-device-label);
+  stroke: var(--map-surface);
+  stroke-width: 0.07;
+  stroke-linejoin: round;
+  paint-order: stroke;
+}
+.fp-device-selected .fp-device-dot {
+  stroke: #ef4444;
+  stroke-width: 0.08;
+}
+.fp-node-selected .fp-node {
+  stroke: #ef4444;
+  stroke-width: 0.08;
+}
+.fp-node-editing .fp-node {
+  stroke: #f59e0b;
+  stroke-width: 0.1;
+}
+.fp-node-editing {
+  animation: fp-node-editing-pulse 1.4s ease-in-out infinite;
+}
+@keyframes fp-node-editing-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Snap picker overlay — visible only while in node-editor snap placement.
+   Walls are clickable lines (faint blue → amber on hover); corners are
+   clickable dots (faint amber → solid amber). */
+.wall-pick {
+  stroke: rgba(59, 130, 246, 0.18);
+  stroke-width: 0.18;
+  fill: none;
+  pointer-events: stroke;
+  cursor: pointer;
+  transition: stroke 100ms ease, stroke-width 100ms ease;
+}
+.wall-pick:hover {
+  stroke: rgba(245, 158, 11, 0.85);
+  stroke-width: 0.22;
+}
+.corner-pick {
+  fill: rgba(245, 158, 11, 0.4);
+  stroke: rgba(245, 158, 11, 0.85);
+  stroke-width: 0.04;
+  cursor: pointer;
+  transition: fill 100ms ease, r 100ms ease;
+}
+.corner-pick:hover {
+  fill: rgba(245, 158, 11, 0.95);
+}
+
+/* Debug overlay — measured-distance circles when a device is selected */
+.fp-debug-overlay {
+  pointer-events: none;
+}
+.fp-debug-target {
+  animation: fp-debug-pulse 1.6s ease-in-out infinite;
+}
+@keyframes fp-debug-pulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 0.4; }
 }
