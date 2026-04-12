@@ -47,6 +47,29 @@ log "Service user: $SERVICE_USER"
 log "Service:      $SERVICE_NAME on $BIND_ADDR:$PORT"
 echo
 
+# --- 0. Preflight: make sure the install dir is reachable ---------------------
+# Walk every parent dir and verify it has the world-execute bit set, otherwise
+# the unprivileged service user won't be able to traverse into INSTALL_DIR even
+# if it owns INSTALL_DIR itself. Common gotcha when cloning under /home/$USER
+# on Debian (home dirs are mode 700 by default).
+check_path="$INSTALL_DIR"
+while [[ "$check_path" != "/" && -n "$check_path" ]]; do
+  perms=$(stat -c '%a' "$check_path")
+  # Last digit is the "other" octet — needs the execute bit (1, 3, 5, or 7).
+  other=${perms: -1}
+  if (( (other & 1) == 0 )); then
+    echo
+    echo "  error: $check_path is mode $perms — '$SERVICE_USER' can't traverse it." >&2
+    echo "  Re-clone the repo somewhere world-traversable, e.g.:" >&2
+    echo "      sudo mv '$INSTALL_DIR' /opt/$(basename "$INSTALL_DIR")" >&2
+    echo "      cd /opt/$(basename "$INSTALL_DIR")" >&2
+    echo "      sudo ./deploy/install.sh" >&2
+    echo
+    exit 1
+  fi
+  check_path=$(dirname "$check_path")
+done
+
 # --- 1. Node.js 20 (NodeSource) ----------------------------------------------
 if [[ "${SKIP_NODE:-0}" != "1" ]]; then
   if ! command -v node >/dev/null || [[ "$(node -v | sed 's/v//' | cut -d. -f1)" -lt 20 ]]; then

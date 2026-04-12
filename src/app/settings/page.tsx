@@ -1,16 +1,20 @@
 import PageHeader from "@/components/PageHeader";
+import SettingsClient from "./SettingsClient";
+
+// Force dynamic rendering — this page reads/writes config.yaml at request
+// time, so static optimization would be wrong here. (Note: the directive
+// must live on a server component, not on the client child.)
+export const dynamic = "force-dynamic";
 
 export default function SettingsPage() {
   return (
     <>
       <PageHeader
         title="Settings"
-        description="MQTT, map, and locator configuration"
+        description="Edit config.yaml directly — validated and atomically written"
       />
-      <main className="flex-1 p-6">
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-8 text-center text-sm text-zinc-500">
-          Settings editor coming soon
-        </div>
+      <main className="flex-1 flex flex-col min-h-0 p-4">
+        <SettingsClient />
       </main>
     </>
   );

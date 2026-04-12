@@ -177,6 +177,83 @@ export async function scaleConfig(factor: number): Promise<ScaleResult> {
   return { scaledNodes, scaledRooms, scaledFloors };
 }
 
+/**
+ * Replace the entire config.yaml with `yamlText`. Validates the new content
+ * with the shared zod schema before writing — invalid YAML is rejected with
+ * a precise error pointing at the failing field, so the caller can show it
+ * to the user and the on-disk file is never left in a broken state.
+ */
+export interface WriteRawResult {
+  configPath: string;
+  bytes: number;
+}
+
+export async function writeRawConfig(
+  yamlText: string,
+): Promise<WriteRawResult> {
+  const configPath = resolveConfigPath();
+
+  // Parse first — better to surface "your YAML doesn't parse" before the
+  // schema check chases shadows.
+  const doc = parseDocument(yamlText);
+  if (doc.errors.length > 0) {
+    const e = doc.errors[0];
+    throw new ConfigWriteError(
+      `YAML parse error: ${e.message}`,
+      "parse-failed",
+    );
+  }
+
+  const validation = ConfigSchema.safeParse(doc.toJS());
+  if (!validation.success) {
+    const issue = validation.error.issues[0];
+    const issuePath = issue?.path?.join(".") ?? "(root)";
+    throw new ConfigWriteError(
+      `Validation failed at ${issuePath}: ${issue?.message ?? "unknown"}`,
+      "invalid-after-edit",
+    );
+  }
+
+  const dir = path.dirname(configPath);
+  const base = path.basename(configPath);
+  const tmpPath = path.join(dir, `.${base}.tmp-${process.pid}`);
+  try {
+    await writeFile(tmpPath, yamlText, "utf8");
+    await rename(tmpPath, configPath);
+  } catch (err) {
+    throw new ConfigWriteError(
+      `Failed to write config: ${(err as Error).message}`,
+      "io-failed",
+    );
+  }
+
+  return { configPath, bytes: Buffer.byteLength(yamlText, "utf8") };
+}
+
+/** Read the raw YAML text of config.yaml without parsing. */
+export async function readRawConfig(): Promise<{
+  configPath: string;
+  yaml: string;
+}> {
+  const configPath = resolveConfigPath();
+  let yaml: string;
+  try {
+    yaml = await readFile(configPath, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new ConfigWriteError(
+        `Config file does not exist at ${configPath}`,
+        "not-found",
+      );
+    }
+    throw new ConfigWriteError(
+      `Could not read config at ${configPath}: ${(err as Error).message}`,
+      "io-failed",
+    );
+  }
+  return { configPath, yaml };
+}
+
 /** Update the `point` field of a node identified by `nodeId`. */
 export async function updateNodePoint(
   nodeId: string,
