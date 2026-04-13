@@ -16,9 +16,9 @@ export function resolveConfigPath(): string {
   if (fromEnv && fromEnv.length > 0) {
     return path.isAbsolute(fromEnv)
       ? fromEnv
-      : path.resolve(process.cwd(), fromEnv);
+      : path.resolve(/* turbopackIgnore: true */ process.cwd(), fromEnv);
   }
-  return path.resolve(process.cwd(), "config.yaml");
+  return path.resolve(/* turbopackIgnore: true */ process.cwd(), "config.yaml");
 }
 
 export class ConfigNotFoundError extends Error {
