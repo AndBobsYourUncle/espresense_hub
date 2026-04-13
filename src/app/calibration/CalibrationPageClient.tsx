@@ -34,36 +34,44 @@ import type { NodeFit, NodePairFit } from "@/lib/calibration/autofit";
 import { LOCATOR_LABELS } from "@/components/map/locatorColors";
 
 const POLL_MS = 2000;
-const MIN_CONFIDENT_SAMPLES = 20;
 
+/**
+ * Classify a node's calibration health by comparing the auto-fit proposal
+ * against the firmware's current absorption value — using the same threshold
+ * the auto-apply loop uses to decide whether to push.
+ *
+ *   green  — settled: |proposed − current| < minDelta (auto-apply would skip)
+ *   amber  — drifting: minDelta ≤ delta < 3 × minDelta (update pending)
+ *   red    — significant drift: delta ≥ 3 × minDelta
+ *   gray   — no confident fit yet (too few samples or poor R²)
+ */
 function biasClassification(
-  meanMeters: number,
-  count: number,
-): { dot: string; row: string; label: string } {
-  if (count < MIN_CONFIDENT_SAMPLES) {
-    return {
-      dot: "bg-zinc-400",
-      row: "",
-      label: "low confidence",
-    };
+  proposedAbsorption: number | null,
+  confident: boolean,
+  currentAbsorptionStr: string | undefined,
+  minDelta: number,
+): { dot: string; label: string } {
+  const current =
+    currentAbsorptionStr != null ? parseFloat(currentAbsorptionStr) : NaN;
+  if (
+    !confident ||
+    proposedAbsorption == null ||
+    !Number.isFinite(current) ||
+    current <= 0
+  ) {
+    return { dot: "bg-zinc-400", label: "no confident fit yet" };
   }
-  const a = Math.abs(meanMeters);
-  if (a < 0.5)
-    return {
-      dot: "bg-emerald-500",
-      row: "",
-      label: "good",
-    };
-  if (a < 1.5)
+  const delta = Math.abs(proposedAbsorption - current);
+  if (delta < minDelta)
+    return { dot: "bg-emerald-500", label: "settled" };
+  if (delta < 3 * minDelta)
     return {
       dot: "bg-amber-500",
-      row: "",
-      label: "warning",
+      label: `drifting (Δ${delta.toFixed(2)})`,
     };
   return {
     dot: "bg-red-500",
-    row: "",
-    label: "bad",
+    label: `significant drift (Δ${delta.toFixed(2)})`,
   };
 }
 
@@ -316,15 +324,12 @@ export default function CalibrationPageClient() {
                 </thead>
                 <tbody>
                   {rows.map((n) => {
-                    // Use the better of the two for the indicator dot —
-                    // ground truth wins if available.
-                    const primaryBias =
-                      n.gtCount > 0
-                        ? n.gtMeanResidualMeters
-                        : n.meanResidualMeters;
-                    const primaryCount =
-                      n.gtCount > 0 ? n.gtCount : n.count;
-                    const cls = biasClassification(primaryBias, primaryCount);
+                    const cls = biasClassification(
+                      n.proposedAbsorption,
+                      n.confident,
+                      n.settings["absorption"],
+                      audit?.minDelta ?? 0.1,
+                    );
                     const isExpanded = expandedNode === n.nodeId;
                     const hasPairs = n.pairs && n.pairs.length > 0;
                     return (

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  fitAllNodes,
   refreshNodePairFits,
   type NodePairFit,
 } from "@/lib/calibration/autofit";
@@ -40,6 +41,14 @@ export interface NodeCalibrationDTO {
    * hasn't published any settings yet.
    */
   settings: Record<string, string>;
+  /**
+   * Auto-fit proposal for this node's absorption value, from the streaming
+   * log-log regression over ground-truth samples. Null if the node has too
+   * few samples or a poor R² for a confident fit.
+   */
+  proposedAbsorption: number | null;
+  /** True when the fit has enough samples and R² to be acted on by auto-apply. */
+  confident: boolean;
 }
 
 export interface CalibrationResponse {
@@ -60,6 +69,11 @@ export function GET() {
   if (store.nodeGroundTruthSamples.size > 0) {
     refreshNodePairFits(store);
   }
+
+  // Index the per-node absorption fits so we can attach them to each DTO.
+  const fitByNode = new Map(
+    fitAllNodes(store).map((f) => [f.nodeId, f]),
+  );
 
   // Include any node we've heard from — via either residual aggregate or
   // via a retained setting message. Settings can show up before residuals.
@@ -116,6 +130,8 @@ export function GET() {
       ),
       settings,
       pairs,
+      proposedAbsorption: fitByNode.get(nodeId)?.proposedAbsorption ?? null,
+      confident: fitByNode.get(nodeId)?.confident ?? false,
     });
   }
 

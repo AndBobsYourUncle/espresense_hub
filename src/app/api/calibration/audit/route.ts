@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   getAutoApplyAuditLog,
   getAutoApplyIntervalMs,
+  getAutoApplyMinDelta,
   getAutoApplyState,
   PER_NODE_RATE_LIMIT_MS,
   type AutoApplyEvent,
@@ -14,6 +15,12 @@ export interface AutoApplyAuditResponse {
   cycleIntervalMs: number;
   /** Per-node rate limit window, in ms (no node can be re-pushed within this). */
   rateLimitMs: number;
+  /**
+   * Minimum |Δ| in path-loss exponent that triggers a push. Changes
+   * smaller than this are silently skipped. Exposed here so the
+   * calibration UI can use the same threshold for status-dot coloring.
+   */
+  minDelta: number;
   /** Recent auto-apply events, newest first. Bounded to 200 entries. */
   events: AutoApplyEvent[];
   /**
@@ -30,6 +37,7 @@ export function GET(): Response {
   const body: AutoApplyAuditResponse = {
     cycleIntervalMs: getAutoApplyIntervalMs(),
     rateLimitMs: PER_NODE_RATE_LIMIT_MS,
+    minDelta: getAutoApplyMinDelta(),
     events: getAutoApplyAuditLog().slice(),
     lastAutoApplyByNode: state.lastAutoApplyByNode,
     serverTime: Date.now(),
