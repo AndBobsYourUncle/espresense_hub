@@ -13,6 +13,51 @@ interface Props {
 
 const DATALIST_ID = "room-floor-area-tags";
 
+/**
+ * Find the wall edge nearest to `(doorX, doorY)` in `points` and return
+ * the corner coordinates plus distances from each end.
+ */
+function findDoorEdge(
+  doorX: number,
+  doorY: number,
+  points: readonly (readonly number[])[],
+): {
+  cornerA: [number, number];
+  cornerB: [number, number];
+  wallLength: number;
+  distFromA: number;
+} | null {
+  const n = points.length;
+  if (n < 2) return null;
+  let bestDist = Infinity;
+  let best: {
+    cornerA: [number, number];
+    cornerB: [number, number];
+    wallLength: number;
+    distFromA: number;
+  } | null = null;
+  for (let i = 0; i < n; i++) {
+    const ax = points[i][0], ay = points[i][1];
+    const bx = points[(i + 1) % n][0], by = points[(i + 1) % n][1];
+    const edgeDx = bx - ax, edgeDy = by - ay;
+    const len2 = edgeDx * edgeDx + edgeDy * edgeDy;
+    let t: number, px: number, py: number;
+    if (len2 < 1e-12) { t = 0; px = ax; py = ay; }
+    else {
+      t = Math.max(0, Math.min(1, ((doorX - ax) * edgeDx + (doorY - ay) * edgeDy) / len2));
+      px = ax + t * edgeDx;
+      py = ay + t * edgeDy;
+    }
+    const dist = Math.hypot(doorX - px, doorY - py);
+    if (dist < bestDist) {
+      bestDist = dist;
+      const wallLength = Math.sqrt(len2);
+      best = { cornerA: [ax, ay], cornerB: [bx, by], wallLength, distFromA: t * wallLength };
+    }
+  }
+  return best;
+}
+
 export default function RoomRelationsPanel({ floor }: Props) {
   const { activeTool } = useMapTool();
   const {
@@ -48,6 +93,7 @@ export default function RoomRelationsPanel({ floor }: Props) {
 
   if (activeTool !== "room-relations" || !editingRoomId) return null;
 
+  const editingRoom = floor.rooms.find((r) => r.id === editingRoomId) ?? null;
   const otherRooms = floor.rooms.filter((r) => r.id && r.id !== editingRoomId);
 
   return (
@@ -169,56 +215,122 @@ export default function RoomRelationsPanel({ floor }: Props) {
                 const checked = draftOpenTo.includes(rid);
                 const hasDoor = Boolean(draftDoors[rid]);
                 const isPlacing = doorPlacingForRoom === rid;
+
+                const doorEdge =
+                  checked && hasDoor && editingRoom?.points
+                    ? findDoorEdge(draftDoors[rid][0], draftDoors[rid][1], editingRoom.points)
+                    : null;
+
                 return (
                   <div
                     key={rid}
-                    className="flex items-center gap-2 px-4 py-2 border-t border-zinc-100 dark:border-zinc-800/60 first:border-t-0"
+                    className="border-t border-zinc-100 dark:border-zinc-800/60 first:border-t-0"
                   >
-                    <label className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleOpenTo(rid)}
-                        className="h-3.5 w-3.5 rounded border-zinc-300 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 shrink-0"
-                      />
-                      <span className="text-sm text-zinc-900 dark:text-zinc-100 truncate">
-                        {room.name ?? rid}
-                      </span>
-                    </label>
-                    {/* Show same-group badge */}
-                    {room.floor_area && room.floor_area === draftFloorArea && !checked && (
-                      <span className="text-xs text-zinc-400 font-mono shrink-0">
-                        same group
-                      </span>
-                    )}
-                    {/* Door placement button — only for connected rooms */}
-                    {checked && (
-                      <button
-                        type="button"
-                        title={hasDoor ? "Reposition door on map" : "Mark door position on map"}
-                        onClick={() => isPlacing ? stopDoorPlacing() : startDoorPlacing(rid)}
-                        className={`h-6 w-6 inline-flex items-center justify-center rounded-md shrink-0 transition-colors ${
-                          isPlacing
-                            ? "bg-sky-100 dark:bg-sky-900/50 text-sky-600 dark:text-sky-400"
-                            : hasDoor
-                            ? "text-sky-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                            : "text-zinc-300 dark:text-zinc-600 hover:text-zinc-500 dark:hover:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                        }`}
-                        aria-pressed={isPlacing}
-                      >
-                        <Crosshair className="h-3 w-3" />
-                      </button>
-                    )}
-                    {/* Clear door button — only when a door is set and not placing */}
-                    {checked && hasDoor && !isPlacing && (
-                      <button
-                        type="button"
-                        title="Clear door position"
-                        onClick={() => setDoor(rid, null)}
-                        className="h-6 w-6 inline-flex items-center justify-center rounded-md shrink-0 text-zinc-300 dark:text-zinc-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
+                    {/* Main room row */}
+                    <div className="flex items-center gap-2 px-4 py-2">
+                      <label className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleOpenTo(rid)}
+                          className="h-3.5 w-3.5 rounded border-zinc-300 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 shrink-0"
+                        />
+                        <span className="text-sm text-zinc-900 dark:text-zinc-100 truncate">
+                          {room.name ?? rid}
+                        </span>
+                      </label>
+                      {/* Show same-group badge */}
+                      {room.floor_area && room.floor_area === draftFloorArea && !checked && (
+                        <span className="text-xs text-zinc-400 font-mono shrink-0">
+                          same group
+                        </span>
+                      )}
+                      {/* Door placement button — only for connected rooms */}
+                      {checked && (
+                        <button
+                          type="button"
+                          title={hasDoor ? "Reposition door on map" : "Mark door position on map"}
+                          onClick={() => isPlacing ? stopDoorPlacing() : startDoorPlacing(rid)}
+                          className={`h-6 w-6 inline-flex items-center justify-center rounded-md shrink-0 transition-colors ${
+                            isPlacing
+                              ? "bg-sky-100 dark:bg-sky-900/50 text-sky-600 dark:text-sky-400"
+                              : hasDoor
+                              ? "text-sky-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                              : "text-zinc-300 dark:text-zinc-600 hover:text-zinc-500 dark:hover:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                          }`}
+                          aria-pressed={isPlacing}
+                        >
+                          <Crosshair className="h-3 w-3" />
+                        </button>
+                      )}
+                      {/* Clear door button — only when a door is set and not placing */}
+                      {checked && hasDoor && !isPlacing && (
+                        <button
+                          type="button"
+                          title="Clear door position"
+                          onClick={() => setDoor(rid, null)}
+                          className="h-6 w-6 inline-flex items-center justify-center rounded-md shrink-0 text-zinc-300 dark:text-zinc-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Distance-from-corner inputs — shown when a door position is set */}
+                    {doorEdge && doorEdge.wallLength > 1e-6 && (
+                      <div className="px-4 pb-2.5 grid grid-cols-2 gap-x-3 gap-y-1">
+                        {/* Distance from corner A (edge start) */}
+                        <div>
+                          <div className="text-[10px] text-zinc-400 mb-0.5">From corner A</div>
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              value={doorEdge.distFromA.toFixed(2)}
+                              step="0.01"
+                              min={0}
+                              max={doorEdge.wallLength.toFixed(2)}
+                              onChange={(e) => {
+                                const raw = parseFloat(e.target.value);
+                                if (isNaN(raw)) return;
+                                const d = Math.max(0, Math.min(doorEdge.wallLength, raw));
+                                const t = d / doorEdge.wallLength;
+                                const [ax, ay] = doorEdge.cornerA;
+                                const [bx, by] = doorEdge.cornerB;
+                                setDoor(rid, [ax + t * (bx - ax), ay + t * (by - ay)]);
+                              }}
+                              className="w-full h-7 px-2 text-xs bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md text-zinc-900 dark:text-zinc-100 text-right tabular-nums"
+                            />
+                            <span className="text-[10px] text-zinc-400 shrink-0">m</span>
+                          </div>
+                        </div>
+                        {/* Distance from corner B (edge end) */}
+                        <div>
+                          <div className="text-[10px] text-zinc-400 mb-0.5">From corner B</div>
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              value={(doorEdge.wallLength - doorEdge.distFromA).toFixed(2)}
+                              step="0.01"
+                              min={0}
+                              max={doorEdge.wallLength.toFixed(2)}
+                              onChange={(e) => {
+                                const raw = parseFloat(e.target.value);
+                                if (isNaN(raw)) return;
+                                const d = Math.max(0, Math.min(doorEdge.wallLength, raw));
+                                const t = (doorEdge.wallLength - d) / doorEdge.wallLength;
+                                const [ax, ay] = doorEdge.cornerA;
+                                const [bx, by] = doorEdge.cornerB;
+                                setDoor(rid, [ax + t * (bx - ax), ay + t * (by - ay)]);
+                              }}
+                              className="w-full h-7 px-2 text-xs bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md text-zinc-900 dark:text-zinc-100 text-right tabular-nums"
+                            />
+                            <span className="text-[10px] text-zinc-400 shrink-0">m</span>
+                          </div>
+                        </div>
+                        <div className="col-span-2 text-[10px] text-zinc-400 text-right">
+                          Wall: {doorEdge.wallLength.toFixed(2)} m total
+                        </div>
+                      </div>
                     )}
                   </div>
                 );

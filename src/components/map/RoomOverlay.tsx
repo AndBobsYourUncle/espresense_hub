@@ -16,26 +16,25 @@ const ARROW_COLOR = "#14b8a6";
 const ARROW_STROKE = 0.05;
 const MARKER_ID = "room-conn-arrow";
 
-// Door arrow geometry (metres): shaft starts this far inside the editing room
-// and ends this far into the connected room, perpendicular to the wall.
-const DOOR_INSIDE  = 0.28;
-const DOOR_OUTSIDE = 0.38;
+// Door swing arc geometry (metres).
+const DOOR_WIDTH   = 0.9;   // door leaf width (radius of swing arc)
+const DOOR_STROKE_W = 0.04; // stroke width for door leaf and arc
 
 /**
- * Return the outward unit normal of the edge of `points` that is nearest to
- * `(doorX, doorY)`, oriented toward `(facingX, facingY)`.
+ * Return the outward unit normal AND edge tangent for the edge of `points`
+ * nearest to `(doorX, doorY)`, with normal oriented toward `(facingX, facingY)`.
  */
-function wallNormalAt(
+function wallEdgeInfoAt(
   doorX: number,
   doorY: number,
   points: readonly (readonly number[])[],
   facingX: number,
   facingY: number,
-): { nx: number; ny: number } | null {
+): { nx: number; ny: number; tanX: number; tanY: number } | null {
   const n = points.length;
   if (n < 2) return null;
   let bestDist = Infinity;
-  let best: { nx: number; ny: number } | null = null;
+  let best: { nx: number; ny: number; tanX: number; tanY: number } | null = null;
   for (let i = 0; i < n; i++) {
     const ax = points[i][0], ay = points[i][1];
     const bx = points[(i + 1) % n][0], by = points[(i + 1) % n][1];
@@ -53,7 +52,9 @@ function wallNormalAt(
       const el = Math.sqrt(len2) || 1;
       const perpX = edgeDy / el, perpY = -edgeDx / el;
       const dot = perpX * (facingX - px) + perpY * (facingY - py);
-      best = { nx: dot >= 0 ? perpX : -perpX, ny: dot >= 0 ? perpY : -perpY };
+      const nx = dot >= 0 ? perpX : -perpX;
+      const ny = dot >= 0 ? perpY : -perpY;
+      best = { nx, ny, tanX: edgeDx / el, tanY: edgeDy / el };
     }
   }
   return best;
@@ -474,10 +475,9 @@ export default function RoomOverlay({ floor, transform }: Props) {
           );
         })}
 
-        {/* ── Connection arrows ─────────────────────────────────────────────── */}
-        {/* Without a door: centroid→centroid arrow as usual.
-            With a door: short arrow perpendicular to the wall, starting inside
-            the editing room and ending just inside the connected room. */}
+        {/* ── Connection indicators ─────────────────────────────────────────── */}
+        {/* Without a door: centroid→centroid arrow.
+            With a door: classic architectural door swing arc (leaf + quarter-circle). */}
         {isRelationsMode &&
           selectedEntry &&
           relations.draftOpenTo.map((connId) => {
@@ -490,34 +490,58 @@ export default function RoomOverlay({ floor, transform }: Props) {
               const connCentroid = connEntry.room.points
                 ? polygonCentroid(connEntry.room.points)
                 : null;
-              const normal = connCentroid
-                ? wallNormalAt(doorX, doorY, selectedEntry.room.points, connCentroid[0], connCentroid[1])
+              const edgeInfo = connCentroid
+                ? wallEdgeInfoAt(doorX, doorY, selectedEntry.room.points, connCentroid[0], connCentroid[1])
                 : null;
 
-              if (normal) {
+              if (edgeInfo) {
                 const sx = tx(transform, doorX);
                 const sy = ty(transform, doorY);
-                // Normal may need sign-flipping for SVG axes.
-                const snx = transform.flipX ? -normal.nx : normal.nx;
-                const sny = transform.flipY ? -normal.ny : normal.ny;
+                // Adjust normal and tangent for SVG axis flips.
+                const snx = transform.flipX ? -edgeInfo.nx : edgeInfo.nx;
+                const sny = transform.flipY ? -edgeInfo.ny : edgeInfo.ny;
+                const stx = transform.flipX ? -edgeInfo.tanX : edgeInfo.tanX;
+                const sty = transform.flipY ? -edgeInfo.tanY : edgeInfo.tanY;
+
+                const halfW = DOOR_WIDTH / 2;
+                const hingeX = sx - stx * halfW;
+                const hingeY = sy - sty * halfW;
+                const freeEndX = sx + stx * halfW;
+                const freeEndY = sy + sty * halfW;
+                // Open tip: hinge offset inward (opposite outward normal) by DOOR_WIDTH
+                const openTipX = hingeX - snx * DOOR_WIDTH;
+                const openTipY = hingeY - sny * DOOR_WIDTH;
+
+                // Sweep: cross product of (freeEnd−hinge) × (openTip−hinge) in SVG space.
+                // Positive → clockwise in screen coords → sweep=1.
+                const sweep = (sty * snx - stx * sny) >= 0 ? 1 : 0;
+
+                const f = (v: number) => v.toFixed(4);
                 return (
-                  <line
-                    key={`conn-${connId}`}
-                    x1={sx - snx * DOOR_INSIDE}
-                    y1={sy - sny * DOOR_INSIDE}
-                    x2={sx + snx * DOOR_OUTSIDE}
-                    y2={sy + sny * DOOR_OUTSIDE}
-                    stroke={ARROW_COLOR}
-                    strokeWidth={ARROW_STROKE}
-                    strokeLinecap="round"
-                    markerEnd={`url(#${MARKER_ID})`}
-                    style={{ pointerEvents: "none" }}
-                  />
+                  <g key={`conn-${connId}`} style={{ pointerEvents: "none" }}>
+                    {/* Door leaf line */}
+                    <line
+                      x1={hingeX} y1={hingeY}
+                      x2={freeEndX} y2={freeEndY}
+                      stroke={ARROW_COLOR}
+                      strokeWidth={DOOR_STROKE_W}
+                      strokeLinecap="round"
+                    />
+                    {/* Door swing arc (dashed quarter-circle) */}
+                    <path
+                      d={`M ${f(freeEndX)} ${f(freeEndY)} A ${DOOR_WIDTH} ${DOOR_WIDTH} 0 0 ${sweep} ${f(openTipX)} ${f(openTipY)}`}
+                      fill="none"
+                      stroke={ARROW_COLOR}
+                      strokeWidth={DOOR_STROKE_W * 0.65}
+                      strokeLinecap="round"
+                      strokeDasharray={`${(DOOR_WIDTH * 0.14).toFixed(3)} ${(DOOR_WIDTH * 0.09).toFixed(3)}`}
+                    />
+                  </g>
                 );
               }
             }
 
-            // Fallback: centroid-to-centroid
+            // Fallback: centroid-to-centroid arrow
             return (
               <line
                 key={`conn-${connId}`}
