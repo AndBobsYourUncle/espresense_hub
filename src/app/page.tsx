@@ -102,7 +102,7 @@ export default async function MapPage() {
                   <PageHeader
                     title="Map"
                     description={summary}
-                    actions={<MapToolbar />}
+                    inline={<MapToolbar />}
                   />
                   <main className="flex-1 min-h-0 p-6">
                     <MapStage>
