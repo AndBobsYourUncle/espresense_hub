@@ -255,7 +255,7 @@ export default function CalibrationPageClient() {
         description={`${rows.length} node${rows.length === 1 ? "" : "s"} · ${totalSamples.toLocaleString()} residual samples`}
       />
       <main className="flex-1 min-h-0 p-6 overflow-auto">
-        <div className="max-w-3xl space-y-4">
+        <div className="max-w-5xl space-y-4">
           <AutoApplyStatus audit={audit} />
           <LocatorComparisonPanel />
 
@@ -611,7 +611,7 @@ function Th({
   className?: string;
 }) {
   return (
-    <th className={`px-4 py-2.5 text-left font-medium ${className ?? ""}`}>
+    <th className={`px-2.5 py-2.5 text-left font-medium ${className ?? ""}`}>
       {children}
     </th>
   );
@@ -624,7 +624,7 @@ function Td({
   children: React.ReactNode;
   className?: string;
 }) {
-  return <td className={`px-4 py-3 ${className ?? ""}`}>{children}</td>;
+  return <td className={`px-2.5 py-3 ${className ?? ""}`}>{children}</td>;
 }
 
 /**
@@ -1222,9 +1222,12 @@ function BiasCell({
           ? `${mean >= 0 ? "+" : ""}${formatDistanceDisplay(mean, units)}`
           : "—"}
       </div>
-      <div className="text-xs text-zinc-400">
+      <div
+        className="text-xs text-zinc-400"
+        title={hasData ? `${count.toLocaleString()} samples` : undefined}
+      >
         {hasData
-          ? `±${formatDistanceDisplay(stddev, units)} · ${count.toLocaleString()}`
+          ? `±${formatDistanceDisplay(stddev, units)}`
           : "\u00a0"}
       </div>
     </div>
