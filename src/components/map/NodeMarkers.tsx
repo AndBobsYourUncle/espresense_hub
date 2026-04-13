@@ -2,6 +2,7 @@
 
 import type { FloorTransform } from "@/lib/map/geometry";
 import { tx, ty } from "@/lib/map/geometry";
+import { useDeviceSelection } from "./DeviceSelectionProvider";
 import { useMapTool } from "./MapToolProvider";
 import { useNodeEdit } from "./NodeEditProvider";
 import { useRuler } from "./RulerProvider";
@@ -34,6 +35,7 @@ export default function NodeMarkers({ nodes, transform }: Props) {
   const { rulerNodes, toggleNode } = useRuler();
   const { editingId, draft, startEditing } = useNodeEdit();
   const { activeTool, inspectedNodeId, setInspectedNodeId } = useMapTool();
+  const { select: selectDevice } = useDeviceSelection();
 
   return (
     <g>
@@ -71,7 +73,10 @@ export default function NodeMarkers({ nodes, transform }: Props) {
               if (activeTool === "ruler") {
                 toggleNode(n.id);
               } else {
-                // Default (inspect) tool: show node info.
+                // Default (inspect) tool: show node info, and dismiss
+                // any open device panel — keep panels mutually exclusive
+                // so the map isn't cluttered with two side-by-side cards.
+                selectDevice(null);
                 setInspectedNodeId(n.id);
               }
             }}

@@ -54,7 +54,7 @@ export default function DeviceMarkers({
 }: Props) {
   const devices = useDevicePositions(pollMs);
   const { selectedId, select } = useDeviceSelection();
-  const { compareMode } = useMapTool();
+  const { compareMode, setInspectedNodeId } = useMapTool();
   const now = Date.now();
 
   const visible = devices.filter((d) => now - d.lastSeen <= staleAfterMs);
@@ -118,6 +118,10 @@ export default function DeviceMarkers({
             transform={`translate(${sx} ${sy})`}
             onClick={(e) => {
               e.stopPropagation();
+              // Selecting a device dismisses any open node inspector —
+              // the two side-panels would otherwise pile up on the same
+              // map, and the user almost never wants to study both at once.
+              if (!isSelected) setInspectedNodeId(null);
               select(isSelected ? null : d.id);
             }}
             style={{ cursor: "pointer" }}

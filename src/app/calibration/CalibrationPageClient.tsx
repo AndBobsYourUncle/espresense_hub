@@ -8,7 +8,16 @@ import {
   useState,
 } from "react";
 import { useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronRight, Sparkles, Trash2, X, Activity } from "lucide-react";
+import {
+  Activity,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  Sparkles,
+  Timer,
+  Trash2,
+  X,
+} from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import { useUnits } from "@/components/UnitsProvider";
 import { formatDistanceDisplay } from "@/lib/units";
@@ -64,6 +73,44 @@ function formatRelative(ms: number): string {
   return `${Math.floor(delta / 3_600_000)}h ago`;
 }
 
+/**
+ * Fetch the auto-apply audit + rate-limit state every 10 s. Returns the
+ * snapshot plus a tick that increments every second so consumers can
+ * re-render countdowns between fetches.
+ */
+function useAuditState(): {
+  audit: AutoApplyAuditResponse | null;
+  /** A monotonically increasing tick so callers can trigger re-renders. */
+  tick: number;
+} {
+  const [audit, setAudit] = useState<AutoApplyAuditResponse | null>(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/calibration/audit");
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as AutoApplyAuditResponse;
+        if (!cancelled) setAudit(data);
+      } catch {
+        // best-effort
+      }
+    };
+    load();
+    const fetchId = setInterval(load, 10_000);
+    const tickId = setInterval(() => setTick((t) => t + 1), 1_000);
+    return () => {
+      cancelled = true;
+      clearInterval(fetchId);
+      clearInterval(tickId);
+    };
+  }, []);
+
+  return { audit, tick };
+}
+
 function useCalibration(): {
   data: CalibrationResponse | null;
   refresh: () => Promise<void>;
@@ -100,6 +147,7 @@ function useCalibration(): {
 
 export default function CalibrationPageClient() {
   const { data, refresh } = useCalibration();
+  const { audit } = useAuditState();
   const { units } = useUnits();
   const [resetting, setResetting] = useState(false);
 
@@ -205,7 +253,7 @@ export default function CalibrationPageClient() {
       />
       <main className="flex-1 min-h-0 p-6 overflow-auto">
         <div className="max-w-3xl space-y-4">
-          <AutoApplyStatus />
+          <AutoApplyStatus audit={audit} />
 
           <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 px-4 py-3 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
             <p className="font-medium text-zinc-900 dark:text-zinc-100 mb-1">
@@ -298,6 +346,7 @@ export default function CalibrationPageClient() {
                             <span className="text-[10px] text-zinc-400">
                               {cls.label}
                             </span>
+                            <RateLimitBadge nodeId={n.nodeId} audit={audit} />
                           </div>
                         </Td>
                         <Td>
@@ -570,70 +619,86 @@ function Td({
 }
 
 /**
- * Shows the live auto-apply status: when it last fired, how many
- * actions in the last hour, recent events. The auto-apply runs in
- * the background every 5 minutes and pushes confident absorption
- * updates to firmware automatically — this is the user's window
- * into what it's been doing.
+ * Shows the live auto-apply status: cycle countdown, recent events,
+ * currently rate-limited nodes. The auto-apply runs in the background
+ * every 5 minutes and pushes confident absorption updates to firmware
+ * automatically — this is the user's window into what it's been doing
+ * and what it's about to do.
  */
-function AutoApplyStatus() {
-  const [audit, setAudit] = useState<AutoApplyAuditResponse | null>(null);
+function AutoApplyStatus({
+  audit,
+}: {
+  audit: AutoApplyAuditResponse | null;
+}) {
   const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const res = await fetch("/api/calibration/audit");
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as AutoApplyAuditResponse;
-        if (!cancelled) setAudit(data);
-      } catch {
-        // best-effort
-      }
-    };
-    load();
-    const id = setInterval(load, 10_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
 
   if (!audit) return null;
 
+  const now = Date.now();
+  // Estimate the next cycle from the latest event; if no events yet, fall
+  // back to "anytime within cycleIntervalMs" — we don't know the exact
+  // boot time. The UI will be roughly right within a cycle.
   const events = audit.events;
   const lastEvent = events[0];
-  const hourAgo = Date.now() - 3_600_000;
+  const lastEventAt = lastEvent?.timestamp ?? null;
+  const nextCycleAt = lastEventAt
+    ? lastEventAt + audit.cycleIntervalMs
+    : now + audit.cycleIntervalMs;
+  const nextCycleMs = Math.max(0, nextCycleAt - now);
+
+  const hourAgo = now - 3_600_000;
   const lastHourCount = events.filter((e) => e.timestamp >= hourAgo).length;
   const intervalMin = audit.cycleIntervalMs / 60_000;
+  const rateLimitMin = audit.rateLimitMs / 60_000;
+
+  // Nodes that pushed recently and can't be re-pushed yet — sorted by
+  // soonest-to-clear first so the user sees an actionable countdown.
+  const rateLimited: Array<{ nodeId: string; clearsInMs: number }> = [];
+  for (const [nodeId, ts] of Object.entries(audit.lastAutoApplyByNode)) {
+    const clearsAt = ts + audit.rateLimitMs;
+    const clearsInMs = clearsAt - now;
+    if (clearsInMs > 0) rateLimited.push({ nodeId, clearsInMs });
+  }
+  rateLimited.sort((a, b) => a.clearsInMs - b.clearsInMs);
 
   const lastAgo = lastEvent
     ? formatRelativeTime(audit.serverTime - lastEvent.timestamp)
     : null;
 
   return (
-    <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 px-4 py-3 text-xs">
+    <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 text-xs">
       <button
         type="button"
         onClick={() => setExpanded((x) => !x)}
-        className="w-full flex items-center justify-between gap-2 text-left"
+        className="w-full flex items-center justify-between gap-2 text-left px-4 py-3"
       >
         <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300">
           <Activity className="h-3.5 w-3.5 text-emerald-500" />
           <span className="font-medium">Auto-apply</span>
-          <span className="text-zinc-500">
-            cycles every {intervalMin.toFixed(0)}m
+          <span
+            className="inline-flex items-center gap-1 text-zinc-500"
+            title={`Cycle runs every ${intervalMin.toFixed(0)} minutes`}
+          >
+            <Timer className="h-3 w-3" />
+            next in {formatCountdown(nextCycleMs)}
           </span>
+          {rateLimited.length > 0 && (
+            <span
+              className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400"
+              title={`${rateLimited.length} node${rateLimited.length === 1 ? "" : "s"} rate-limited (${rateLimitMin.toFixed(0)}-min cooldown after each push)`}
+            >
+              <Clock className="h-3 w-3" />
+              {rateLimited.length} cooling
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 text-zinc-500">
           {lastEvent ? (
             <>
               <span>last action {lastAgo}</span>
-              <span>·</span>
+              <span className="text-zinc-300 dark:text-zinc-700">·</span>
               <span>
-                {lastHourCount} change{lastHourCount === 1 ? "" : "s"} in last
-                hour
+                {lastHourCount} change{lastHourCount === 1 ? "" : "s"}/hr
               </span>
             </>
           ) : (
@@ -646,62 +711,146 @@ function AutoApplyStatus() {
       </button>
 
       {expanded && (
-        <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-800">
-          {events.length === 0 ? (
-            <div className="text-zinc-500">
-              No auto-apply events yet. The system pushes a calibration
-              update when a node&apos;s proposed absorption differs from its
-              current value by more than 0.05 (rate-limited to once per
-              10 minutes per node).
-            </div>
-          ) : (
-            <table className="w-full text-[11px] font-mono">
-              <thead className="text-[10px] uppercase text-zinc-400">
-                <tr>
-                  <th className="text-left font-normal py-1">when</th>
-                  <th className="text-left font-normal py-1">node</th>
-                  <th className="text-right font-normal py-1">old → new</th>
-                  <th className="text-right font-normal py-1">Δ</th>
-                  <th className="text-right font-normal py-1">samples</th>
-                </tr>
-              </thead>
-              <tbody>
-                {events.slice(0, 30).map((e, i) => (
-                  <tr
-                    key={`${e.timestamp}-${e.nodeId}-${i}`}
-                    className="border-t border-zinc-100 dark:border-zinc-800/50"
+        <div className="px-4 pb-3 space-y-4 border-t border-zinc-200 dark:border-zinc-800 pt-3">
+          {/* Rate-limited nodes section — only shown if any are cooling. */}
+          {rateLimited.length > 0 && (
+            <section>
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+                <Clock className="h-3 w-3" />
+                Rate-limited
+                <span className="normal-case tracking-normal text-zinc-400">
+                  · pushed within last {rateLimitMin.toFixed(0)} min,
+                  cannot re-push until cooldown clears
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-mono text-[11px]">
+                {rateLimited.map((r) => (
+                  <div
+                    key={r.nodeId}
+                    className="flex items-center justify-between gap-2 py-0.5 px-2 rounded bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300"
                   >
-                    <td className="py-1 text-zinc-500">
-                      {formatRelativeTime(audit.serverTime - e.timestamp)}
-                    </td>
-                    <td className="py-1 text-zinc-700 dark:text-zinc-200">
-                      {e.nodeId}
-                    </td>
-                    <td className="py-1 text-right text-zinc-700 dark:text-zinc-200">
-                      {e.oldValue.toFixed(2)} → {e.newValue.toFixed(2)}
-                    </td>
-                    <td
-                      className={`py-1 text-right ${
-                        e.delta > 0
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : "text-amber-600 dark:text-amber-400"
-                      }`}
-                    >
-                      {e.delta >= 0 ? "+" : ""}
-                      {e.delta.toFixed(2)}
-                    </td>
-                    <td className="py-1 text-right text-zinc-400">
-                      {e.validSamples}
-                    </td>
-                  </tr>
+                    <span className="truncate">{r.nodeId}</span>
+                    <span className="text-amber-600/70 dark:text-amber-400/70 shrink-0 tabular-nums">
+                      {formatCountdown(r.clearsInMs)}
+                    </span>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            </section>
           )}
+
+          {/* Recent events section. */}
+          <section>
+            <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+              Recent pushes
+              {events.length > 0 && (
+                <span className="normal-case tracking-normal text-zinc-400">
+                  {" "}
+                  · showing {Math.min(events.length, 30)} of {events.length}
+                </span>
+              )}
+            </div>
+            {events.length === 0 ? (
+              <div className="text-zinc-500 text-[11px] leading-relaxed">
+                No auto-apply events yet. The system pushes a calibration
+                update when a node&apos;s proposed absorption differs from
+                its current value by more than 0.05 (rate-limited to once
+                per {rateLimitMin.toFixed(0)} minutes per node). With
+                everything within threshold, nothing needs pushing —
+                that&apos;s the steady state.
+              </div>
+            ) : (
+              <table className="w-full text-[11px] font-mono tabular-nums">
+                <thead className="text-[10px] uppercase text-zinc-400">
+                  <tr>
+                    <th className="text-left font-normal py-1 w-20">when</th>
+                    <th className="text-left font-normal py-1">node</th>
+                    <th className="text-right font-normal py-1">old → new</th>
+                    <th className="text-right font-normal py-1 w-12">Δ</th>
+                    <th className="text-right font-normal py-1 w-16">
+                      samples
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {events.slice(0, 30).map((e, i) => (
+                    <tr
+                      key={`${e.timestamp}-${e.nodeId}-${i}`}
+                      className="border-t border-zinc-100 dark:border-zinc-800/50"
+                    >
+                      <td className="py-1 text-zinc-500">
+                        {formatRelativeTime(audit.serverTime - e.timestamp)}
+                      </td>
+                      <td className="py-1 text-zinc-700 dark:text-zinc-200">
+                        {e.nodeId}
+                      </td>
+                      <td className="py-1 text-right text-zinc-700 dark:text-zinc-200">
+                        {e.oldValue.toFixed(2)} → {e.newValue.toFixed(2)}
+                      </td>
+                      <td
+                        className={`py-1 text-right ${
+                          e.delta > 0
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-amber-600 dark:text-amber-400"
+                        }`}
+                      >
+                        {e.delta >= 0 ? "+" : ""}
+                        {e.delta.toFixed(2)}
+                      </td>
+                      <td className="py-1 text-right text-zinc-400">
+                        {e.validSamples}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
         </div>
       )}
     </div>
   );
+}
+
+/**
+ * Small inline badge that appears next to a node's name in the calibration
+ * table when that node was recently auto-applied and is still inside its
+ * cooldown window. Shows the time remaining until the next push is allowed.
+ * Renders nothing when the node is not rate-limited — so rows stay clean
+ * the rest of the time.
+ */
+function RateLimitBadge({
+  nodeId,
+  audit,
+}: {
+  nodeId: string;
+  audit: AutoApplyAuditResponse | null;
+}) {
+  if (!audit) return null;
+  const lastApplied = audit.lastAutoApplyByNode[nodeId];
+  if (!lastApplied) return null;
+  const clearsAt = lastApplied + audit.rateLimitMs;
+  const clearsInMs = clearsAt - Date.now();
+  if (clearsInMs <= 0) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-[10px] font-mono tabular-nums px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400"
+      title={`Auto-apply pushed this node ${formatRelativeTime(Date.now() - lastApplied)}; next push allowed in ${formatCountdown(clearsInMs)} (${(audit.rateLimitMs / 60_000).toFixed(0)}-min cooldown)`}
+    >
+      <Clock className="h-2.5 w-2.5" />
+      {formatCountdown(clearsInMs)}
+    </span>
+  );
+}
+
+/** Format a positive ms duration as "Mm SSs" or "MM:SS" for short windows. */
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return "now";
+  const totalSec = Math.ceil(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m === 0) return `${s}s`;
+  return `${m}m ${s.toString().padStart(2, "0")}s`;
 }
 
 function formatRelativeTime(ms: number): string {

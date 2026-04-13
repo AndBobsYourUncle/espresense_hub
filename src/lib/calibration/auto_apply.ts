@@ -36,7 +36,7 @@ const N_MIN = 2.0;
 const N_MAX = 7.0;
 
 /** Per-node minimum gap between auto-applies. */
-const PER_NODE_RATE_LIMIT_MS = 10 * 60_000;
+export const PER_NODE_RATE_LIMIT_MS = 10 * 60_000;
 
 /** How often the auto-apply check runs. */
 export const AUTO_APPLY_INTERVAL_MS = 5 * 60_000;
@@ -61,6 +61,41 @@ const AUDIT_LOG_MAX = 200;
 
 export function getAutoApplyAuditLog(): readonly AutoApplyEvent[] {
   return auditLog;
+}
+
+/**
+ * Snapshot of the auto-apply state for persistence: audit log + per-node
+ * rate-limit timestamps. Both must round-trip across restarts so we don't
+ * (a) lose the forensic record and (b) accidentally re-push a node we
+ * just pushed 30 seconds before a deploy.
+ */
+export interface AutoApplyStateSnapshot {
+  auditLog: AutoApplyEvent[];
+  lastAutoApplyByNode: Record<string, number>;
+}
+
+export function getAutoApplyState(): AutoApplyStateSnapshot {
+  return {
+    auditLog: [...auditLog],
+    lastAutoApplyByNode: Object.fromEntries(lastAutoApplyByNode),
+  };
+}
+
+export function restoreAutoApplyState(snap: AutoApplyStateSnapshot): void {
+  auditLog.length = 0;
+  if (Array.isArray(snap.auditLog)) {
+    for (const e of snap.auditLog.slice(0, AUDIT_LOG_MAX)) {
+      auditLog.push(e);
+    }
+  }
+  lastAutoApplyByNode.clear();
+  if (snap.lastAutoApplyByNode) {
+    for (const [k, v] of Object.entries(snap.lastAutoApplyByNode)) {
+      if (typeof v === "number" && Number.isFinite(v)) {
+        lastAutoApplyByNode.set(k, v);
+      }
+    }
+  }
 }
 
 /**

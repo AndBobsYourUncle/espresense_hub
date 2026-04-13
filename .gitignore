@@ -49,5 +49,7 @@ next-env.d.ts
 /calibration.json.tmp
 /devices.json
 /devices.json.tmp
+/audit.json
+/audit.json.tmp
 
 /.claude/settings.local.json

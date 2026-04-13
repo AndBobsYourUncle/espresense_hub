@@ -4,6 +4,7 @@ import {
   runAutoApplyCycle,
 } from "@/lib/calibration/auto_apply";
 import { refreshNodePairFits } from "@/lib/calibration/autofit";
+import { loadAuditState, saveAuditState } from "@/lib/state/audit_persistence";
 import {
   CALIBRATION_SAVE_INTERVAL_MS,
   loadCalibration,
@@ -75,6 +76,11 @@ export async function bootstrap(): Promise<void> {
     } catch (err) {
       console.error("[bootstrap] loadCalibration failed", err);
     }
+    try {
+      await loadAuditState();
+    } catch (err) {
+      console.error("[bootstrap] loadAuditState failed", err);
+    }
 
     store.setMqttStatus({
       status: "connecting",
@@ -142,11 +148,25 @@ export async function bootstrap(): Promise<void> {
       );
     }, CALIBRATION_SAVE_INTERVAL_MS);
 
+    // Periodic audit + rate-limit save — keeps the auto-apply forensic
+    // log durable across restarts and prevents the rate-limit map from
+    // being wiped (which would otherwise let auto-apply re-push a node
+    // immediately after a deploy).
+    setInterval(() => {
+      saveAuditState().catch((err) =>
+        console.error("[bootstrap] saveAuditState failed", err),
+      );
+    }, CALIBRATION_SAVE_INTERVAL_MS);
+
     // Best-effort save on graceful shutdown. Node may not always get
     // here (kill -9, OOM) but normal stop signals do.
     const flushAll = async () => {
       try {
-        await Promise.all([saveCalibration(store), saveDevicePins(store)]);
+        await Promise.all([
+          saveCalibration(store),
+          saveDevicePins(store),
+          saveAuditState(),
+        ]);
         console.log("[bootstrap] flushed state to disk on shutdown");
       } catch (err) {
         console.error("[bootstrap] shutdown flush failed", err);

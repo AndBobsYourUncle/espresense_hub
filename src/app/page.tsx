@@ -93,36 +93,42 @@ export default async function MapPage() {
 
   return (
     <>
-      <PageHeader title="Map" description={summary} />
-      <main className="flex-1 min-h-0 p-6 flex flex-col gap-3">
-        {floor ? (
-          <DeviceSelectionProvider>
-            <RulerProvider>
-              <NodeEditProvider>
-                <MapToolProvider>
-                  <PinHighlightProvider>
-                    <MapToolbar />
-                    <div className="flex-1 min-h-0">
-                      <MapStage>
-                        <FloorPlan config={config} floor={floor} />
-                        <CompareLegend />
-                        <DeviceDetailPanel />
-                        <NodeInspectionPanel nodes={floorNodes} />
-                        <RulerPanel nodes={floorNodes} />
-                        <NodeEditPanel nodes={floorNodes} />
-                      </MapStage>
-                    </div>
-                  </PinHighlightProvider>
-                </MapToolProvider>
-              </NodeEditProvider>
-            </RulerProvider>
-          </DeviceSelectionProvider>
-        ) : (
-          <div className="h-full rounded-xl border border-dashed border-zinc-300 dark:border-zinc-800 flex items-center justify-center text-sm text-zinc-500">
-            No floors defined in config.yaml
-          </div>
-        )}
-      </main>
+      {floor ? (
+        <DeviceSelectionProvider>
+          <RulerProvider>
+            <NodeEditProvider>
+              <MapToolProvider>
+                <PinHighlightProvider>
+                  <PageHeader
+                    title="Map"
+                    description={summary}
+                    actions={<MapToolbar />}
+                  />
+                  <main className="flex-1 min-h-0 p-6">
+                    <MapStage>
+                      <FloorPlan config={config} floor={floor} />
+                      <CompareLegend />
+                      <DeviceDetailPanel />
+                      <NodeInspectionPanel nodes={floorNodes} />
+                      <RulerPanel nodes={floorNodes} />
+                      <NodeEditPanel nodes={floorNodes} />
+                    </MapStage>
+                  </main>
+                </PinHighlightProvider>
+              </MapToolProvider>
+            </NodeEditProvider>
+          </RulerProvider>
+        </DeviceSelectionProvider>
+      ) : (
+        <>
+          <PageHeader title="Map" description={summary} />
+          <main className="flex-1 min-h-0 p-6">
+            <div className="h-full rounded-xl border border-dashed border-zinc-300 dark:border-zinc-800 flex items-center justify-center text-sm text-zinc-500">
+              No floors defined in config.yaml
+            </div>
+          </main>
+        </>
+      )}
     </>
   );
 }
