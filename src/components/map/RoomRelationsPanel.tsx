@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Network, Save, X } from "lucide-react";
 import { useDraggable } from "@/lib/hooks/useDraggable";
 import type { Floor } from "@/lib/config";
@@ -10,13 +11,8 @@ interface Props {
   floor: Floor;
 }
 
-/**
- * Floating panel for the Room Relations tool. Shows when the tool is active.
- *
- * - Before a room is selected: instructs the user to click a room.
- * - After a room is selected: shows a checklist of all other rooms on the
- *   floor (for `open_to`) and a text field for the `floor_area` tag.
- */
+const DATALIST_ID = "room-floor-area-tags";
+
 export default function RoomRelationsPanel({ floor }: Props) {
   const { activeTool } = useMapTool();
   const {
@@ -34,9 +30,18 @@ export default function RoomRelationsPanel({ floor }: Props) {
 
   const { pos, handlers } = useDraggable({ x: 0, y: 0 });
 
+  // Collect unique floor_area tags from all rooms on this floor so the
+  // datalist can offer them as suggestions.
+  const existingTags = useMemo(() => {
+    const tags = new Set<string>();
+    for (const room of floor.rooms) {
+      if (room.floor_area) tags.add(room.floor_area);
+    }
+    return [...tags].sort();
+  }, [floor.rooms]);
+
   if (activeTool !== "room-relations") return null;
 
-  // All rooms except the one being edited — candidates for open_to.
   const otherRooms = floor.rooms.filter((r) => r.id && r.id !== editingRoomId);
 
   return (
@@ -83,20 +88,47 @@ export default function RoomRelationsPanel({ floor }: Props) {
             </div>
           </div>
 
-          {/* floor_area */}
+          {/* floor_area — datalist gives dropdown of existing tags + free-form new entry */}
           <div className="px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 shrink-0">
-            <label className="block text-xs uppercase tracking-wide text-zinc-400 mb-1.5">
-              Floor area tag
+            <label
+              htmlFor="floor-area-input"
+              className="block text-xs uppercase tracking-wide text-zinc-400 mb-1.5"
+            >
+              Floor area group
             </label>
-            <input
-              type="text"
-              value={draftFloorArea}
-              onChange={(e) => setFloorArea(e.target.value)}
-              placeholder="e.g. main_living (optional)"
-              className="w-full h-8 px-2.5 text-sm bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-            <p className="mt-1 text-xs text-zinc-400 leading-relaxed">
-              Rooms sharing the same tag are treated as mutually open — great for open-plan kitchen/dining/living.
+            <div className="flex items-center gap-1.5">
+              <input
+                id="floor-area-input"
+                type="text"
+                list={DATALIST_ID}
+                value={draftFloorArea}
+                onChange={(e) => setFloorArea(e.target.value)}
+                placeholder={
+                  existingTags.length > 0
+                    ? "Pick existing or type new…"
+                    : "e.g. main_living (optional)"
+                }
+                className="flex-1 h-8 px-2.5 text-sm bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              {draftFloorArea && (
+                <button
+                  type="button"
+                  onClick={() => setFloorArea("")}
+                  title="Clear"
+                  className="h-8 w-8 inline-flex items-center justify-center rounded-md text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 shrink-0"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+            <datalist id={DATALIST_ID}>
+              {existingTags.map((tag) => (
+                <option key={tag} value={tag} />
+              ))}
+            </datalist>
+            <p className="mt-1.5 text-xs text-zinc-400 leading-relaxed">
+              Rooms sharing the same group are treated as mutually open —
+              great for kitchen/dining/living combos.
             </p>
           </div>
 
@@ -129,13 +161,20 @@ export default function RoomRelationsPanel({ floor }: Props) {
                     <span className="text-sm text-zinc-900 dark:text-zinc-100 truncate">
                       {room.name ?? rid}
                     </span>
+                    {/* Show the room's floor_area tag if it matches the draft,
+                        so the user can see which other rooms are in the same group */}
+                    {room.floor_area && room.floor_area === draftFloorArea && (
+                      <span className="ml-auto text-xs text-zinc-400 font-mono shrink-0">
+                        same group
+                      </span>
+                    )}
                   </label>
                 );
               })
             )}
           </div>
 
-          {/* Footer: error + save */}
+          {/* Footer */}
           <div className="px-4 py-3 border-t border-zinc-200 dark:border-zinc-800 shrink-0 space-y-2">
             {error && (
               <div className="text-xs text-red-600 dark:text-red-400">{error}</div>

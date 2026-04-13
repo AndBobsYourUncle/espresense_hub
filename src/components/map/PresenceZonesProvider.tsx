@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import type { PresenceZone } from "@/lib/config/schema";
+import { slugify } from "@/lib/config/schema";
 import { useMapTool } from "./MapToolProvider";
 
 /** Hex fill colors cycled by zone index. */
@@ -36,6 +37,10 @@ interface PresenceZonesContextValue {
   selectZone: (id: string | null) => void;
   /** Toggle a room id in/out of the selected zone's rooms list. */
   toggleRoom: (roomId: string) => void;
+  /** Add a new zone with the given label, auto-generate id from label. */
+  addZone: (label: string) => void;
+  /** Remove a zone by id. */
+  removeZone: (id: string) => void;
   /** Persist all draft zones to config.yaml. */
   save: () => Promise<void>;
   /** Discard changes and reset to last-saved state. */
@@ -82,11 +87,9 @@ export default function PresenceZonesProvider({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialZonesKey]);
 
-  // Reset selection when the tool is deactivated.
+  // Clear error when the tool is deactivated.
   useEffect(() => {
-    if (activeTool !== "presence-zones") {
-      setError(null);
-    }
+    if (activeTool !== "presence-zones") setError(null);
   }, [activeTool]);
 
   const selectZone = useCallback((id: string | null) => {
@@ -106,6 +109,39 @@ export default function PresenceZonesProvider({
       }),
     );
   }, [selectedZoneId]);
+
+  const addZone = useCallback((label: string) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    setDraftZones((prev) => {
+      const baseId = slugify(trimmed) || "zone";
+      // Ensure unique id within the current draft.
+      let id = baseId;
+      let n = 2;
+      while (prev.some((z) => z.id === id)) id = `${baseId}_${n++}`;
+      const newZone: PresenceZone = {
+        id,
+        label: trimmed,
+        type: "rooms",
+        rooms: [],
+        transition_threshold: 0.85,
+      };
+      // Auto-select the new zone so the user can immediately assign rooms.
+      setSelectedZoneId(id);
+      return [...prev, newZone];
+    });
+  }, []);
+
+  const removeZone = useCallback((idToRemove: string) => {
+    setDraftZones((prev) => {
+      const next = prev.filter((z) => z.id !== idToRemove);
+      setSelectedZoneId((sel) => {
+        if (sel !== idToRemove) return sel;
+        return next[0]?.id ?? null;
+      });
+      return next;
+    });
+  }, []);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -138,6 +174,8 @@ export default function PresenceZonesProvider({
         error,
         selectZone,
         toggleRoom,
+        addZone,
+        removeZone,
         save,
         cancel,
       }}
