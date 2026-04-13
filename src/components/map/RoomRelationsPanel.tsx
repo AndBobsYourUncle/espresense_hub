@@ -6,6 +6,7 @@ import { useDraggable } from "@/lib/hooks/useDraggable";
 import type { Floor } from "@/lib/config";
 import { useMapTool } from "./MapToolProvider";
 import { useRoomRelations } from "./RoomRelationsProvider";
+import { GROUP_COLORS } from "./RoomOverlay";
 
 interface Props {
   floor: Floor;
@@ -38,6 +39,17 @@ export default function RoomRelationsPanel({ floor }: Props) {
       if (room.floor_area) tags.add(room.floor_area);
     }
     return [...tags].sort();
+  }, [floor.rooms]);
+
+  // Ordered group list with assigned colours (mirrors RoomOverlay's groupColorMap).
+  const groupLegend = useMemo(() => {
+    const seen = new Map<string, string>();
+    let n = 0;
+    for (const room of floor.rooms) {
+      if (room.floor_area && !seen.has(room.floor_area))
+        seen.set(room.floor_area, GROUP_COLORS[n++ % GROUP_COLORS.length]);
+    }
+    return [...seen.entries()].map(([tag, color]) => ({ tag, color }));
   }, [floor.rooms]);
 
   if (activeTool !== "room-relations") return null;
@@ -73,8 +85,30 @@ export default function RoomRelationsPanel({ floor }: Props) {
 
       {/* Body */}
       {!editingRoomId ? (
-        <div className="p-4 text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
-          Click a room on the map to edit its connections and floor-area tag.
+        <div className="flex flex-col">
+          <div className="p-4 text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
+            Click a room on the map to edit its connections and floor-area tag.
+          </div>
+          {groupLegend.length > 0 && (
+            <div className="px-4 pb-4 border-t border-zinc-100 dark:border-zinc-800 pt-3">
+              <div className="text-xs uppercase tracking-wide text-zinc-400 mb-2">
+                Floor area groups
+              </div>
+              <div className="space-y-1.5">
+                {groupLegend.map(({ tag, color }) => (
+                  <div key={tag} className="flex items-center gap-2.5">
+                    <span
+                      className="h-3 w-5 rounded-sm shrink-0"
+                      style={{ border: `1.5px dashed ${color}`, backgroundColor: `${color}22` }}
+                    />
+                    <span className="text-sm text-zinc-700 dark:text-zinc-300 font-mono truncate">
+                      {tag}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="flex-1 min-h-0 flex flex-col overflow-auto">
@@ -173,6 +207,25 @@ export default function RoomRelationsPanel({ floor }: Props) {
               })
             )}
           </div>
+
+          {/* Floor area group legend */}
+          {groupLegend.length > 0 && (
+            <div className="px-4 py-2 border-t border-zinc-100 dark:border-zinc-800 shrink-0">
+              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                {groupLegend.map(({ tag, color }) => (
+                  <div key={tag} className="flex items-center gap-1.5 min-w-0">
+                    <span
+                      className="h-2.5 w-3.5 rounded-sm shrink-0"
+                      style={{ border: `1.5px dashed ${color}`, backgroundColor: `${color}22` }}
+                    />
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400 font-mono truncate">
+                      {tag}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Footer */}
           <div className="px-4 py-3 border-t border-zinc-200 dark:border-zinc-800 shrink-0 space-y-2">

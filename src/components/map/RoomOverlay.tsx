@@ -16,7 +16,7 @@ const ARROW_COLOR = "#14b8a6";
 const ARROW_STROKE = 0.05;
 const MARKER_ID = "room-conn-arrow";
 
-const GROUP_COLORS = [
+export const GROUP_COLORS = [
   "#f59e0b", // amber-500
   "#ec4899", // pink-500
   "#f97316", // orange-500
