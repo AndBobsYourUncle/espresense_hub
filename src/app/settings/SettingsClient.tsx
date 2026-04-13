@@ -1,19 +1,24 @@
 "use client";
 
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useReducer, useState } from "react";
 import { parseDocument, type Document } from "yaml";
 import {
   AlertCircle,
   Check,
   FileText,
   Loader2,
+  Plus,
   RefreshCw,
+  Router,
   Save,
   Settings2,
+  Smartphone,
   SlidersHorizontal,
+  Square,
   Radio,
   Code,
   Map as MapIcon,
+  Trash2,
 } from "lucide-react";
 
 interface LoadResponse {
@@ -41,7 +46,15 @@ type Status =
   | { kind: "restarting" }
   | { kind: "error"; message: string };
 
-type TabKey = "general" | "mqtt" | "filtering" | "map" | "advanced";
+type TabKey =
+  | "general"
+  | "mqtt"
+  | "filtering"
+  | "map"
+  | "devices"
+  | "nodes"
+  | "rooms"
+  | "advanced";
 
 const TABS: Array<{
   key: TabKey;
@@ -49,20 +62,26 @@ const TABS: Array<{
   icon: typeof Settings2;
   hint: string;
 }> = [
-  { key: "general", label: "General", icon: Settings2, hint: "Timeouts, retention" },
+  { key: "general", label: "General", icon: Settings2, hint: "Timeouts, GPS, history" },
   { key: "mqtt", label: "MQTT", icon: Radio, hint: "Broker connection" },
-  { key: "filtering", label: "Filtering", icon: SlidersHorizontal, hint: "Position smoothing & Kalman tuning" },
+  { key: "filtering", label: "Filtering", icon: SlidersHorizontal, hint: "Position smoothing, Kalman, optimization" },
   { key: "map", label: "Map display", icon: MapIcon, hint: "Floor plan rendering" },
+  { key: "devices", label: "Devices", icon: Smartphone, hint: "Tracked + excluded device matchers" },
+  { key: "nodes", label: "Nodes", icon: Router, hint: "Per-node metadata (positions: edit on map)" },
+  { key: "rooms", label: "Rooms", icon: Square, hint: "Room adjacency (polygons: edit in YAML)" },
   { key: "advanced", label: "Advanced", icon: Code, hint: "Raw YAML editor" },
 ];
 
 export default function SettingsClient() {
   // The single source of truth on the client is a parsed YAML Document —
   // mutating via `doc.setIn(path, value)` preserves the user's comments
-  // and untouched fields. We keep the *string* form alongside it so that
-  // (a) Save sends raw text matching what the structured forms produced,
-  // (b) the Advanced tab can edit it directly and hand it back.
-  const docRef = useRef<Document | null>(null);
+  // and untouched fields. The Document object is intentionally mutable;
+  // useState holds the (stable) reference so render-time reads are
+  // legitimate state reads, and `forceRender` propagates mutations.
+  // We keep the *string* form alongside it so that (a) Save sends raw
+  // text matching what the structured forms produced, (b) the Advanced
+  // tab can edit it directly and hand it back.
+  const [doc, setDoc] = useState<Document | null>(null);
   const [yaml, setYaml] = useState<string>("");
   const [original, setOriginal] = useState<string>("");
   const [configPath, setConfigPath] = useState<string>("");
@@ -86,7 +105,7 @@ export default function SettingsClient() {
           });
           return;
         }
-        docRef.current = parseDocument(data.yaml);
+        setDoc(parseDocument(data.yaml));
         setYaml(data.yaml);
         setOriginal(data.yaml);
         setConfigPath(data.configPath ?? "");
@@ -109,7 +128,6 @@ export default function SettingsClient() {
    * back to its default doesn't leave a stale `field: ` line.
    */
   const setField = (path: ReadonlyArray<string | number>, value: unknown) => {
-    const doc = docRef.current;
     if (!doc) return;
     if (value === "" || value === null || value === undefined) {
       doc.deleteIn(path);
@@ -123,13 +141,40 @@ export default function SettingsClient() {
     forceRender();
   };
 
+  /** Append a new item to a sequence at `path`. Used by list-based tabs. */
+  const addToList = (path: ReadonlyArray<string | number>, value: unknown) => {
+    if (!doc) return;
+    // If the sequence doesn't exist yet, set it as a new array.
+    if (!doc.hasIn(path)) {
+      doc.setIn(path, [value]);
+    } else {
+      doc.addIn(path, value);
+    }
+    setYaml(doc.toString());
+    if (status.kind === "saved" || status.kind === "error") {
+      setStatus({ kind: "idle" });
+    }
+    forceRender();
+  };
+
+  /** Delete a sequence element at `path` (last segment is the index). */
+  const deleteAt = (path: ReadonlyArray<string | number>) => {
+    if (!doc) return;
+    doc.deleteIn(path);
+    setYaml(doc.toString());
+    if (status.kind === "saved" || status.kind === "error") {
+      setStatus({ kind: "idle" });
+    }
+    forceRender();
+  };
+
   /** Used by the Advanced tab — accepts raw text and re-parses. */
   const setRawYaml = (text: string) => {
     setYaml(text);
     try {
-      docRef.current = parseDocument(text);
+      setDoc(parseDocument(text));
     } catch {
-      // leave docRef pointing at the last good parse; structured forms
+      // leave doc pointing at the last good parse; structured forms
       // would just see stale values. Save will still send `text`.
     }
     if (status.kind === "saved" || status.kind === "error") {
@@ -166,7 +211,7 @@ export default function SettingsClient() {
   };
 
   const revert = () => {
-    docRef.current = parseDocument(original);
+    setDoc(parseDocument(original));
     setYaml(original);
     setStatus({ kind: "idle" });
     forceRender();
@@ -228,8 +273,6 @@ export default function SettingsClient() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
-
-  const doc = docRef.current;
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -334,6 +377,12 @@ export default function SettingsClient() {
           <FilteringTab doc={doc} setField={setField} />
         ) : tab === "map" ? (
           <MapTab doc={doc} setField={setField} />
+        ) : tab === "devices" ? (
+          <DevicesTab doc={doc} setField={setField} addToList={addToList} deleteAt={deleteAt} />
+        ) : tab === "nodes" ? (
+          <NodesTab doc={doc} setField={setField} addToList={addToList} deleteAt={deleteAt} />
+        ) : tab === "rooms" ? (
+          <RoomsTab doc={doc} setField={setField} addToList={addToList} deleteAt={deleteAt} />
         ) : (
           <AdvancedTab yaml={yaml} setRawYaml={setRawYaml} />
         )}
@@ -362,9 +411,22 @@ interface SetField {
   (path: ReadonlyArray<string | number>, value: unknown): void;
 }
 
+interface AddToList {
+  (path: ReadonlyArray<string | number>, value: unknown): void;
+}
+
+interface DeleteAt {
+  (path: ReadonlyArray<string | number>): void;
+}
+
 interface DocProps {
   doc: Document;
   setField: SetField;
+}
+
+interface DocListProps extends DocProps {
+  addToList: AddToList;
+  deleteAt: DeleteAt;
 }
 
 /** Helper: read a scalar from the doc, returning a fallback if missing. */
@@ -555,45 +617,135 @@ function Select<T extends string>({
 
 function GeneralTab({ doc, setField }: DocProps) {
   return (
-    <Section
-      title="General"
-      description="Timeouts and retention. Service restart not required for these — they apply on the next solve."
-    >
-      <Field
-        label="Device timeout"
-        hint="Drop measurements older than this many seconds. Devices that haven't reported recently fall out of the live tracking."
+    <>
+      <Section
+        title="Timeouts and retention"
+        description="Restart not required — applied on the next solve / cleanup tick."
       >
-        <NumberInput
-          value={get<number>(doc, ["timeout"], 30)}
-          onChange={(v) => setField(["timeout"], v)}
-          min={5}
-          step={5}
-          unit="seconds"
-        />
-      </Field>
-      <Field
-        label="Away timeout"
-        hint="Mark a device as 'away' (no longer tracked) after this many seconds without a fresh fix."
+        <Field
+          label="Device timeout"
+          hint="Drop measurements older than this many seconds. Devices that haven't reported recently fall out of live tracking."
+        >
+          <NumberInput
+            value={get<number>(doc, ["timeout"], 30)}
+            onChange={(v) => setField(["timeout"], v)}
+            min={5}
+            step={5}
+            unit="seconds"
+          />
+        </Field>
+        <Field
+          label="Away timeout"
+          hint="Mark a device as 'away' after this many seconds without a fresh fix."
+        >
+          <NumberInput
+            value={get<number>(doc, ["away_timeout"], 120)}
+            onChange={(v) => setField(["away_timeout"], v)}
+            min={10}
+            step={10}
+            unit="seconds"
+          />
+        </Field>
+        <Field
+          label="Device retention"
+          hint="How long to remember a device after it goes away. Duration string like '30d', '12h', '2w'."
+        >
+          <TextInput
+            value={get<string>(doc, ["device_retention"], "30d")}
+            onChange={(v) => setField(["device_retention"], v)}
+            placeholder="30d"
+          />
+        </Field>
+      </Section>
+
+      <Section
+        title="GPS"
+        description="Optional: ground-truth GPS coordinates for the home origin. Used by integrations that want to map the local floor coordinates to absolute lat/long. Leave blank if not needed."
       >
-        <NumberInput
-          value={get<number>(doc, ["away_timeout"], 120)}
-          onChange={(v) => setField(["away_timeout"], v)}
-          min={10}
-          step={10}
-          unit="seconds"
-        />
-      </Field>
-      <Field
-        label="Device retention"
-        hint="How long to remember a device after it goes away. Format: a duration string like '30d', '12h', '2w'."
+        <Field label="Latitude">
+          <NumberInput
+            value={get<number | undefined>(doc, ["gps", "latitude"], undefined)}
+            onChange={(v) => setField(["gps", "latitude"], v)}
+            step={0.000001}
+            min={-90}
+            max={90}
+            unit="°"
+          />
+        </Field>
+        <Field label="Longitude">
+          <NumberInput
+            value={get<number | undefined>(doc, ["gps", "longitude"], undefined)}
+            onChange={(v) => setField(["gps", "longitude"], v)}
+            step={0.000001}
+            min={-180}
+            max={180}
+            unit="°"
+          />
+        </Field>
+        <Field label="Elevation" hint="Above sea level, meters.">
+          <NumberInput
+            value={get<number | undefined>(doc, ["gps", "elevation"], undefined)}
+            onChange={(v) => setField(["gps", "elevation"], v)}
+            step={1}
+            unit="m"
+          />
+        </Field>
+        <Field
+          label="Rotation"
+          hint="Degrees from north for the local floor coordinate system. 0 = +x is east, 90 = +x is north."
+        >
+          <NumberInput
+            value={get<number | undefined>(doc, ["gps", "rotation"], undefined)}
+            onChange={(v) => setField(["gps", "rotation"], v)}
+            step={1}
+            min={-360}
+            max={360}
+            unit="°"
+          />
+        </Field>
+        <Field
+          label="Report"
+          hint="Publish the computed lat/long for each device alongside its local position."
+        >
+          <Toggle
+            value={get<boolean>(doc, ["gps", "report"], false)}
+            onChange={(v) => setField(["gps", "report"], v)}
+          />
+        </Field>
+      </Section>
+
+      <Section
+        title="History"
+        description="Persist position fixes to a SQL database for later analysis. Disabled by default."
       >
-        <TextInput
-          value={get<string>(doc, ["device_retention"], "30d")}
-          onChange={(v) => setField(["device_retention"], v)}
-          placeholder="30d"
-        />
-      </Field>
-    </Section>
+        <Field label="Enabled">
+          <Toggle
+            value={get<boolean>(doc, ["history", "enabled"], false)}
+            onChange={(v) => setField(["history", "enabled"], v)}
+          />
+        </Field>
+        <Field
+          label="Database URL"
+          hint="SQLAlchemy-style connection string. Default sqlite:///espresense.db keeps everything in a local file."
+        >
+          <TextInput
+            value={get<string>(doc, ["history", "db"], "sqlite:///espresense.db")}
+            onChange={(v) => setField(["history", "db"], v)}
+            placeholder="sqlite:///espresense.db"
+          />
+        </Field>
+        <Field
+          label="Expire after"
+          hint="Drop history older than this duration. '24h', '7d', '30d', etc."
+        >
+          <TextInput
+            value={get<string>(doc, ["history", "expire_after"], "24h")}
+            onChange={(v) => setField(["history", "expire_after"], v)}
+            placeholder="24h"
+          />
+        </Field>
+      </Section>
+    </>
   );
 }
 
@@ -756,6 +908,62 @@ function FilteringTab({ doc, setField }: DocProps) {
           />
         </Field>
       </Section>
+
+      <Section
+        title="Optimization"
+        description="Background re-fitting of node absorption from accumulated ground-truth samples. Service restart required."
+      >
+        <Field label="Enabled">
+          <Toggle
+            value={get<boolean>(doc, ["optimization", "enabled"], true)}
+            onChange={(v) => setField(["optimization", "enabled"], v)}
+          />
+        </Field>
+        <Field
+          label="Optimizer"
+          hint="Per-node fits each listener independently (recommended). Global fits one absorption value across all nodes. Legacy preserves the upstream companion's behavior."
+        >
+          <Select<"per_node_absorption" | "global_absorption" | "legacy">
+            value={
+              get<"per_node_absorption" | "global_absorption" | "legacy">(
+                doc,
+                ["optimization", "optimizer"],
+                "per_node_absorption",
+              )
+            }
+            onChange={(v) => setField(["optimization", "optimizer"], v)}
+            options={[
+              { value: "per_node_absorption", label: "Per-node" },
+              { value: "global_absorption", label: "Global" },
+              { value: "legacy", label: "Legacy" },
+            ]}
+          />
+        </Field>
+        <Field
+          label="Cycle interval"
+          hint="How often the optimizer re-evaluates fits, in seconds. Default 3600 (1 hour). Auto-apply still runs on its own 5-minute cadence."
+        >
+          <NumberInput
+            value={get<number>(doc, ["optimization", "interval_secs"], 3600)}
+            onChange={(v) => setField(["optimization", "interval_secs"], v)}
+            min={60}
+            step={60}
+            unit="seconds"
+          />
+        </Field>
+        <Field
+          label="Snapshot retention"
+          hint="Keep the last N minutes of fits in memory for diff/preview UI."
+        >
+          <NumberInput
+            value={get<number>(doc, ["optimization", "keep_snapshot_mins"], 5)}
+            onChange={(v) => setField(["optimization", "keep_snapshot_mins"], v)}
+            min={1}
+            step={1}
+            unit="minutes"
+          />
+        </Field>
+      </Section>
     </>
   );
 }
@@ -816,6 +1024,417 @@ function MapTab({ doc, setField }: DocProps) {
         />
       </Field>
     </Section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// List-based tabs (Devices, Nodes, Rooms)
+// ---------------------------------------------------------------------------
+
+/**
+ * Generic row container used by Devices / Nodes / Rooms. Renders the
+ * supplied children in a card-like row with a delete button on the
+ * right. Caller composes the actual fields inside.
+ */
+function ListRow({
+  onDelete,
+  children,
+}: {
+  onDelete: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-3 p-3 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 mb-2">
+      <div className="flex-1 min-w-0 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-2">
+        {children}
+      </div>
+      <button
+        type="button"
+        onClick={onDelete}
+        className="shrink-0 h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+        title="Delete this entry"
+        aria-label="Delete"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Compact label + control for use inside a ListRow. The list-tab grid
+ * is denser than the Field component — labels go on top, not to the side.
+ */
+function MiniField({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block min-w-0">
+      <span
+        className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-0.5"
+        title={hint}
+      >
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+/** Empty-state message for a list with no entries. */
+function EmptyList({ message }: { message: string }) {
+  return (
+    <div className="text-xs text-zinc-500 italic px-3 py-4 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-md">
+      {message}
+    </div>
+  );
+}
+
+/** Add-button for list tabs. */
+function AddButton({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-3 inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300"
+    >
+      <Plus className="h-3.5 w-3.5" />
+      {label}
+    </button>
+  );
+}
+
+interface DeviceMatch {
+  id?: string;
+  name?: string;
+}
+
+function DevicesTab({ doc, setField, addToList, deleteAt }: DocListProps) {
+  const data = doc.toJS() as { devices?: DeviceMatch[]; exclude_devices?: DeviceMatch[] };
+  const tracked = data.devices ?? [];
+  const excluded = data.exclude_devices ?? [];
+  return (
+    <>
+      <Section
+        title="Tracked devices"
+        description="Match rules for devices the hub should track and compute positions for. Each entry can specify an ID (BLE MAC, IRK, alias) and/or a name. If both are set, both must match. If neither list is empty, only matching devices are tracked. Service restart required."
+      >
+        {tracked.length === 0 ? (
+          <EmptyList message="No tracked-device rules. With this list empty, every device the hub hears gets tracked." />
+        ) : (
+          tracked.map((d, i) => (
+            <ListRow
+              key={`t-${i}`}
+              onDelete={() => deleteAt(["devices", i])}
+            >
+              <MiniField label="ID" hint="BLE MAC, IRK, or alias">
+                <TextInput
+                  value={d.id ?? ""}
+                  onChange={(v) => setField(["devices", i, "id"], v)}
+                  placeholder="irk:..."
+                />
+              </MiniField>
+              <MiniField label="Name">
+                <TextInput
+                  value={d.name ?? ""}
+                  onChange={(v) => setField(["devices", i, "name"], v)}
+                  placeholder="Nick's Watch"
+                />
+              </MiniField>
+            </ListRow>
+          ))
+        )}
+        <AddButton
+          label="Add tracked-device rule"
+          onClick={() => addToList(["devices"], { id: "", name: "" })}
+        />
+      </Section>
+
+      <Section
+        title="Excluded devices"
+        description="Match rules for devices the hub should ignore entirely (no tracking, no calibration). Useful for filtering out random BLE noise from passing phones, beacons, etc."
+      >
+        {excluded.length === 0 ? (
+          <EmptyList message="No exclusion rules." />
+        ) : (
+          excluded.map((d, i) => (
+            <ListRow
+              key={`x-${i}`}
+              onDelete={() => deleteAt(["exclude_devices", i])}
+            >
+              <MiniField label="ID">
+                <TextInput
+                  value={d.id ?? ""}
+                  onChange={(v) =>
+                    setField(["exclude_devices", i, "id"], v)
+                  }
+                />
+              </MiniField>
+              <MiniField label="Name">
+                <TextInput
+                  value={d.name ?? ""}
+                  onChange={(v) =>
+                    setField(["exclude_devices", i, "name"], v)
+                  }
+                />
+              </MiniField>
+            </ListRow>
+          ))
+        )}
+        <AddButton
+          label="Add exclusion rule"
+          onClick={() => addToList(["exclude_devices"], { id: "", name: "" })}
+        />
+      </Section>
+    </>
+  );
+}
+
+interface NodeData {
+  id?: string;
+  name?: string;
+  point?: [number, number, number];
+  room?: string;
+  enabled?: boolean;
+  stationary?: boolean;
+  floors?: string[];
+}
+
+function NodesTab({ doc, setField, addToList, deleteAt }: DocListProps) {
+  const data = doc.toJS() as { nodes?: NodeData[] };
+  const nodes = data.nodes ?? [];
+  return (
+    <Section
+      title="Nodes"
+      description="ESPresense node metadata. Position (x,y,z) is editable on the map — click a node and use the editor panel. Enabled/stationary/room-override live here. Service restart required for some changes."
+    >
+      {nodes.length === 0 ? (
+        <EmptyList message="No nodes configured. Add one here, then drag it into position on the map." />
+      ) : (
+        nodes.map((n, i) => {
+          const point = n.point;
+          const ptStr = point
+            ? `(${point[0].toFixed(2)}, ${point[1].toFixed(2)}, ${point[2].toFixed(2)})`
+            : "—";
+          return (
+            <ListRow key={`n-${i}`} onDelete={() => deleteAt(["nodes", i])}>
+              <MiniField label="Name" hint="Display name; ID is auto-derived if absent">
+                <TextInput
+                  value={n.name ?? ""}
+                  onChange={(v) => setField(["nodes", i, "name"], v)}
+                  placeholder="living_room"
+                />
+              </MiniField>
+              <MiniField
+                label="Room override"
+                hint="Optional. Skip the polygon point-in-room check; force this room. Useful for nodes mounted on a boundary."
+              >
+                <TextInput
+                  value={n.room ?? ""}
+                  onChange={(v) => setField(["nodes", i, "room"], v)}
+                  placeholder="(auto)"
+                />
+              </MiniField>
+              <MiniField
+                label="Position"
+                hint="Edit on the map: click the node, then use the position editor"
+              >
+                <span className="inline-block h-8 px-2.5 leading-8 rounded-md border border-dashed border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 text-xs font-mono text-zinc-500 max-w-md truncate">
+                  {ptStr}
+                </span>
+              </MiniField>
+              <MiniField
+                label="Enabled"
+                hint="Disabled nodes don't participate in the mesh or solves"
+              >
+                <Toggle
+                  value={n.enabled ?? true}
+                  onChange={(v) => setField(["nodes", i, "enabled"], v)}
+                />
+              </MiniField>
+              <MiniField
+                label="Stationary"
+                hint="Whether this node's own position is fixed (true) or could move (false)"
+              >
+                <Toggle
+                  value={n.stationary ?? true}
+                  onChange={(v) => setField(["nodes", i, "stationary"], v)}
+                />
+              </MiniField>
+            </ListRow>
+          );
+        })
+      )}
+      <AddButton
+        label="Add node"
+        onClick={() =>
+          addToList(["nodes"], {
+            name: "new_node",
+            point: [0, 0, 1],
+            enabled: true,
+            stationary: true,
+          })
+        }
+      />
+    </Section>
+  );
+}
+
+interface RoomData {
+  id?: string;
+  name?: string;
+  points?: Array<[number, number]>;
+  open_to?: string[];
+  floor_area?: string;
+}
+
+function RoomsTab({ doc, setField, addToList, deleteAt }: DocListProps) {
+  const data = doc.toJS() as { floors?: Array<{ rooms?: RoomData[] }> };
+  const floors = data.floors ?? [];
+  // Most homes have a single floor. We surface rooms across all floors,
+  // labeled with their floor index when there's more than one. Polygon
+  // edits stay in the YAML / map UI; this tab is just adjacency.
+  if (floors.length === 0) {
+    return (
+      <Section
+        title="Rooms"
+        description="No floors configured. Add a floor and rooms via the Advanced YAML tab first; once defined, adjacency is editable here."
+      >
+        <EmptyList message="No floors defined." />
+      </Section>
+    );
+  }
+  return (
+    <>
+      {floors.map((floor, fi) => {
+        const rooms = floor.rooms ?? [];
+        const sectionTitle =
+          floors.length === 1
+            ? "Rooms"
+            : `Rooms · floor ${fi + 1}`;
+        return (
+          <Section
+            key={`floor-${fi}`}
+            title={sectionTitle}
+            description={
+              fi === 0
+                ? "Adjacency settings only — polygon vertices stay in the YAML editor or the map. `floor_area` groups rooms into a mutually-adjacent clique (open-plan zones). `open_to` declares per-pair doorways."
+                : undefined
+            }
+          >
+            {rooms.length === 0 ? (
+              <EmptyList message="No rooms on this floor." />
+            ) : (
+              rooms.map((r, ri) => {
+                const ptCount = r.points?.length ?? 0;
+                const openTo = r.open_to ?? [];
+                return (
+                  <ListRow
+                    key={`r-${fi}-${ri}`}
+                    onDelete={() =>
+                      deleteAt(["floors", fi, "rooms", ri])
+                    }
+                  >
+                    <MiniField label="Name">
+                      <TextInput
+                        value={r.name ?? ""}
+                        onChange={(v) =>
+                          setField(["floors", fi, "rooms", ri, "name"], v)
+                        }
+                        placeholder="Living Room"
+                      />
+                    </MiniField>
+                    <MiniField
+                      label="Floor area"
+                      hint="Tag for an open-plan zone. All rooms sharing this string become mutually adjacent."
+                    >
+                      <TextInput
+                        value={r.floor_area ?? ""}
+                        onChange={(v) =>
+                          setField(
+                            ["floors", fi, "rooms", ri, "floor_area"],
+                            v,
+                          )
+                        }
+                        placeholder="(none)"
+                      />
+                    </MiniField>
+                    <MiniField
+                      label={`Polygon (${ptCount} pts)`}
+                      hint="Edit polygon vertices in the Advanced YAML tab"
+                    >
+                      <span className="inline-block h-8 px-2.5 leading-8 rounded-md border border-dashed border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 text-xs font-mono text-zinc-500">
+                        {ptCount} vertices
+                      </span>
+                    </MiniField>
+                    <MiniField
+                      label="Open to"
+                      hint="Comma-separated list of room names this room has a doorway to. Bidirectional."
+                    >
+                      <CommaList
+                        value={openTo}
+                        onChange={(arr) =>
+                          setField(["floors", fi, "rooms", ri, "open_to"], arr)
+                        }
+                        placeholder="Hallway, Kitchen"
+                      />
+                    </MiniField>
+                  </ListRow>
+                );
+              })
+            )}
+            <AddButton
+              label="Add room"
+              onClick={() =>
+                addToList(["floors", fi, "rooms"], {
+                  name: "New Room",
+                  points: [[0, 0], [1, 0], [1, 1], [0, 1]],
+                })
+              }
+            />
+          </Section>
+        );
+      })}
+    </>
+  );
+}
+
+/** Comma-separated list editor — one input, splits on commas. */
+function CommaList({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string[];
+  onChange: (v: string[] | undefined) => void;
+  placeholder?: string;
+}) {
+  return (
+    <input
+      type="text"
+      value={value.join(", ")}
+      onChange={(e) => {
+        const parts = e.target.value
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+        onChange(parts.length > 0 ? parts : undefined);
+      }}
+      placeholder={placeholder}
+      className="w-full max-w-md h-8 px-2.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+    />
   );
 }
 
