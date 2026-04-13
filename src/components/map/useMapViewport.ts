@@ -52,6 +52,10 @@ interface PanState {
   startClientY: number;
   startPanX: number;
   startPanY: number;
+  /** True once we've actually started panning (capture taken). Until
+   *  then, the pointer events flow normally so a quick click reaches
+   *  whatever marker is under the cursor. */
+  captured: boolean;
 }
 
 interface PinchState {
@@ -175,7 +179,11 @@ export function useMapViewport({
       if (!svg) return;
 
       // First pointer: prepare for either a pan (1 finger) or a pinch
-      // (a second finger that arrives later).
+      // (a second finger that arrives later). DON'T capture the pointer
+      // yet — capture would prevent click events from reaching marker
+      // elements (NodeMarkers / DeviceMarkers use onClick which fires on
+      // pointerup). We only capture once movement exceeds the drag
+      // threshold, by which point we know it's a pan, not a click.
       if (!pinchRef.current) {
         pinchRef.current = {
           pointers: new Map([
@@ -189,13 +197,9 @@ export function useMapViewport({
           startClientY: e.clientY,
           startPanX: view.panX,
           startPanY: view.panY,
+          captured: false,
         };
         didPanRef.current = false;
-        try {
-          svg.setPointerCapture(e.pointerId);
-        } catch {
-          // ignore — happens if pointer is already captured elsewhere
-        }
         return;
       }
 
@@ -243,8 +247,22 @@ export function useMapViewport({
       if (!pan || pan.pointerId !== e.pointerId) return;
       const dxPx = e.clientX - pan.startClientX;
       const dyPx = e.clientY - pan.startClientY;
-      if (!didPanRef.current && Math.hypot(dxPx, dyPx) < DRAG_THRESHOLD_PX) {
+      if (!pan.captured && Math.hypot(dxPx, dyPx) < DRAG_THRESHOLD_PX) {
+        // Below threshold — don't capture, don't pan. This lets a quick
+        // click reach marker elements normally.
         return;
+      }
+      // Threshold exceeded → take pointer capture so subsequent moves
+      // and the up event reliably reach us even if the cursor leaves
+      // the SVG bounds. Marker click is no longer a concern by this
+      // point — the user is dragging, not clicking.
+      if (!pan.captured) {
+        pan.captured = true;
+        try {
+          svgRef.current?.setPointerCapture(e.pointerId);
+        } catch {
+          // ignore
+        }
       }
       didPanRef.current = true;
       const svg = svgRef.current;
@@ -274,11 +292,14 @@ export function useMapViewport({
         }
       }
       if (panRef.current && panRef.current.pointerId === e.pointerId) {
+        const wasCaptured = panRef.current.captured;
         panRef.current = null;
-        try {
-          svgRef.current?.releasePointerCapture(e.pointerId);
-        } catch {
-          // ignore
+        if (wasCaptured) {
+          try {
+            svgRef.current?.releasePointerCapture(e.pointerId);
+          } catch {
+            // ignore
+          }
         }
       }
     },
