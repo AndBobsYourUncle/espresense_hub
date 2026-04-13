@@ -25,6 +25,113 @@ const GROUP_COLORS = [
   "#fb7185", // rose-400
 ];
 
+// ─── Geometry helpers ────────────────────────────────────────────────────────
+
+function cross(
+  O: readonly [number, number],
+  A: readonly [number, number],
+  B: readonly [number, number],
+): number {
+  return (A[0] - O[0]) * (B[1] - O[1]) - (A[1] - O[1]) * (B[0] - O[0]);
+}
+
+function ptDist(a: readonly [number, number], b: readonly [number, number]): number {
+  return Math.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2);
+}
+
+function convexHull(pts: [number, number][]): [number, number][] {
+  if (pts.length < 3) return pts.slice();
+  const sorted = [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const lower: [number, number][] = [];
+  for (const p of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0)
+      lower.pop();
+    lower.push(p);
+  }
+  const upper: [number, number][] = [];
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const p = sorted[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0)
+      upper.pop();
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  return [...lower, ...upper];
+}
+
+/**
+ * Concave hull via iterative vertex insertion.
+ *
+ * Starts from the convex hull, then for every edge longer than `maxEdge`
+ * finds the nearest pool vertex that (a) is on the interior side of that
+ * edge and (b) produces two sub-edges both shorter than the original edge,
+ * inserts it, and repeats until the shape settles.
+ *
+ * "Interior side" is determined by comparing sign against the hull centroid,
+ * making the algorithm winding-order agnostic.
+ */
+function concaveHull(points: [number, number][], maxEdge: number): [number, number][] {
+  if (points.length < 3) return points.slice();
+
+  // Deduplicate input to avoid inserting the same coordinate twice.
+  const seen = new Set<string>();
+  const unique: [number, number][] = [];
+  for (const p of points) {
+    const k = `${p[0]}_${p[1]}`;
+    if (!seen.has(k)) { seen.add(k); unique.push(p); }
+  }
+  if (unique.length < 3) return unique;
+
+  const hull = convexHull(unique);
+  const inHull = new Set(hull.map(p => `${p[0]}_${p[1]}`));
+  const pool = unique.filter(p => !inHull.has(`${p[0]}_${p[1]}`));
+
+  let changed = true;
+  while (changed && pool.length > 0) {
+    changed = false;
+
+    // Centroid of the current hull used to determine which side is interior.
+    const cx = hull.reduce((s, p) => s + p[0], 0) / hull.length;
+    const cy = hull.reduce((s, p) => s + p[1], 0) / hull.length;
+    const cen: [number, number] = [cx, cy];
+
+    for (let i = 0; i < hull.length; i++) {
+      const a = hull[i];
+      const b = hull[(i + 1) % hull.length];
+      const ab = ptDist(a, b);
+      if (ab <= maxEdge) continue;
+
+      const interiorSign = Math.sign(cross(a, b, cen));
+
+      let best: [number, number] | null = null;
+      let bestD = Infinity;
+      for (const p of pool) {
+        // Skip points already absorbed into the hull (shouldn't happen, but safe).
+        if (inHull.has(`${p[0]}_${p[1]}`)) continue;
+        // Must be on the interior side of edge a→b.
+        if (interiorSign !== 0 && Math.sign(cross(a, b, p)) !== interiorSign) continue;
+        // Both sub-edges must be shorter than the original (prevents outward bowing).
+        if (ptDist(a, p) >= ab || ptDist(p, b) >= ab) continue;
+        // Prefer the point nearest the midpoint of the edge.
+        const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+        const d = Math.sqrt((p[0] - mx) ** 2 + (p[1] - my) ** 2);
+        if (d < bestD) { bestD = d; best = p; }
+      }
+
+      if (best) {
+        hull.splice(i + 1, 0, best);
+        pool.splice(pool.indexOf(best), 1);
+        inHull.add(`${best[0]}_${best[1]}`);
+        changed = true;
+        break; // restart so centroid is recomputed
+      }
+    }
+  }
+
+  return hull;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function RoomOverlay({ floor, transform }: Props) {
@@ -67,16 +174,10 @@ export default function RoomOverlay({ floor, transform }: Props) {
     return m;
   }, [floor.rooms]);
 
-  // Outer boundary edges per floor_area group.
-  //
-  // Strategy: collect every directed edge (A→B) from every room in the group,
-  // then discard any edge whose reverse (B→A) also appears in the collection.
-  // A matching reverse means two group-rooms share that wall; no reverse means
-  // the edge faces outward and should be drawn.
-  //
-  // This is purely topological — no point-in-polygon probing — so it is exact
-  // for rooms that share vertices and robust for small coordinate gaps (EPS).
-  const groupOuterEdges = useMemo(() => {
+  // Concave hull per floor_area group, in SVG coordinates.
+  // Collects all room polygon vertices for the group, deduplicates them, then
+  // shrink-wraps them to a tight boundary that follows the actual room shapes.
+  const groupHulls = useMemo(() => {
     const groupRooms = new Map<string, typeof floor.rooms>();
     for (const room of floor.rooms) {
       if (!room.floor_area || !room.points || room.points.length < 3) continue;
@@ -85,39 +186,19 @@ export default function RoomOverlay({ floor, transform }: Props) {
       groupRooms.set(room.floor_area, arr);
     }
 
-    // Tolerance for treating two coordinates as equal (metres).
-    const EPS = 0.05;
-    const near = (a: number, b: number) => Math.abs(a - b) < EPS;
-
     return [...groupRooms.entries()].map(([tag, rooms]) => {
-      // Gather all directed edges: [ax, ay, bx, by]
-      type E = [number, number, number, number];
-      const all: E[] = [];
+      const all: [number, number][] = [];
       for (const room of rooms) {
-        const pts = room.points!;
-        for (let i = 0; i < pts.length; i++) {
-          const a = pts[i], b = pts[(i + 1) % pts.length];
-          all.push([a[0], a[1], b[0], b[1]]);
-        }
+        for (const p of room.points!) all.push([p[0], p[1]]);
       }
 
-      // Keep edges whose reverse direction (B→A) does not exist.
-      const outer = all.filter(
-        ([ax, ay, bx, by]) =>
-          !all.some(
-            ([ax2, ay2, bx2, by2]) =>
-              near(ax, bx2) && near(ay, by2) && near(bx, ax2) && near(by, ay2),
-          ),
-      );
-
-      return {
-        tag,
-        color: groupColorMap.get(tag) ?? GROUP_COLORS[0],
-        edges: outer.map(([ax, ay, bx, by]) => ({
-          x1: tx(transform, ax), y1: ty(transform, ay),
-          x2: tx(transform, bx), y2: ty(transform, by),
-        })),
-      };
+      // maxEdge 1.5 m — edges shorter than this won't be subdivided, so the
+      // hull bridges small gaps while still capturing room-scale concavities.
+      const hull = concaveHull(all, 1.5);
+      const svgPts = hull
+        .map(([x, y]) => `${tx(transform, x)},${ty(transform, y)}`)
+        .join(" ");
+      return { tag, svgPts, color: groupColorMap.get(tag) ?? GROUP_COLORS[0] };
     });
   }, [floor.rooms, groupColorMap, transform]);
 
@@ -155,25 +236,23 @@ export default function RoomOverlay({ floor, transform }: Props) {
 
       <g className="room-overlay" style={{ cursor: isRelationsMode || isZonesMode ? "pointer" : "default" }}>
 
-        {/* ── Floor-area group outer edges (relations mode only) ───────────── */}
+        {/* ── Floor-area group hulls (relations mode only) ─────────────────── */}
         {isRelationsMode && (
           <g style={{ pointerEvents: "none" }}>
-            {groupOuterEdges.map(({ tag, color, edges }) => {
+            {groupHulls.map(({ tag, svgPts, color }) => {
               const isActiveGroup = activeDraftGroup !== "" && tag === activeDraftGroup;
-              return edges.map(({ x1, y1, x2, y2 }, i) => (
-                <line
-                  key={`outer-${tag}-${i}`}
-                  x1={x1}
-                  y1={y1}
-                  x2={x2}
-                  y2={y2}
+              return (
+                <polygon
+                  key={`hull-${tag}`}
+                  points={svgPts}
+                  fill={isActiveGroup ? color : "none"}
+                  fillOpacity={isActiveGroup ? 0.12 : 0}
                   stroke={color}
                   strokeWidth={0.07}
                   strokeDasharray="0.18 0.1"
-                  strokeLinecap="round"
-                  opacity={isActiveGroup ? 1 : 0.6}
+                  strokeLinejoin="round"
                 />
-              ));
+              );
             })}
           </g>
         )}
