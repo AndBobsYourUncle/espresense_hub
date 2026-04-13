@@ -912,57 +912,69 @@ function FilteringTab({ doc, setField }: DocProps) {
       </Section>
 
       <Section
-        title="Optimization"
-        description="Background re-fitting of node absorption from accumulated ground-truth samples. Service restart required."
+        title="Auto-apply"
+        description="Background loop that pushes small calibration deltas to firmware over MQTT. Per-node rate limit (10 min) and minimum delta (0.05) gate every push. Service restart required."
       >
-        <Field label="Enabled">
+        <Field
+          label="Algorithm"
+          hint="Streaming per-pair is our pipeline (recommended). The upstream-companion options aren't implemented here — picking one effectively disables auto-apply but leaves the value in your config for compatibility."
+        >
+          <Select<
+            | "streaming_per_pair"
+            | "per_node_absorption"
+            | "global_absorption"
+            | "legacy"
+          >
+            value={get<
+              | "streaming_per_pair"
+              | "per_node_absorption"
+              | "global_absorption"
+              | "legacy"
+            >(doc, ["optimization", "optimizer"], "streaming_per_pair")}
+            onChange={(v) => setField(["optimization", "optimizer"], v)}
+            options={[
+              {
+                value: "streaming_per_pair",
+                label: "Streaming per-pair",
+                hint: "Our pipeline (recommended)",
+              },
+              {
+                value: "per_node_absorption",
+                label: "Per-node (compat, no-op)",
+                hint: "Upstream companion option — does nothing here",
+              },
+              {
+                value: "global_absorption",
+                label: "Global (compat, no-op)",
+                hint: "Upstream companion option — does nothing here",
+              },
+              {
+                value: "legacy",
+                label: "Legacy (compat, no-op)",
+                hint: "Upstream companion option — does nothing here",
+              },
+            ]}
+          />
+        </Field>
+        <Field
+          label="Enabled"
+          hint="Master switch. When off, the loop never runs even with a supported algorithm selected. You can still manually preview + apply via the calibration page."
+        >
           <Toggle
             value={get<boolean>(doc, ["optimization", "enabled"], true)}
             onChange={(v) => setField(["optimization", "enabled"], v)}
           />
         </Field>
         <Field
-          label="Optimizer"
-          hint="Per-node fits each listener independently (recommended). Global fits one absorption value across all nodes. Legacy preserves the upstream companion's behavior."
-        >
-          <Select<"per_node_absorption" | "global_absorption" | "legacy">
-            value={
-              get<"per_node_absorption" | "global_absorption" | "legacy">(
-                doc,
-                ["optimization", "optimizer"],
-                "per_node_absorption",
-              )
-            }
-            onChange={(v) => setField(["optimization", "optimizer"], v)}
-            options={[
-              { value: "per_node_absorption", label: "Per-node" },
-              { value: "global_absorption", label: "Global" },
-              { value: "legacy", label: "Legacy" },
-            ]}
-          />
-        </Field>
-        <Field
           label="Cycle interval"
-          hint="How often the optimizer re-evaluates fits, in seconds. Default 3600 (1 hour). Auto-apply still runs on its own 5-minute cadence."
+          hint="How often the loop wakes up to consider pushes. Default 300 s (5 min). The 10-min per-node rate limit caps re-pushes to once per node regardless of cycle frequency, so dropping this below ~120 s only matters across many nodes."
         >
           <NumberInput
-            value={get<number>(doc, ["optimization", "interval_secs"], 3600)}
+            value={get<number>(doc, ["optimization", "interval_secs"], 300)}
             onChange={(v) => setField(["optimization", "interval_secs"], v)}
             min={60}
             step={60}
             unit="seconds"
-          />
-        </Field>
-        <Field
-          label="Snapshot retention"
-          hint="Keep the last N minutes of fits in memory for diff/preview UI."
-        >
-          <NumberInput
-            value={get<number>(doc, ["optimization", "keep_snapshot_mins"], 5)}
-            onChange={(v) => setField(["optimization", "keep_snapshot_mins"], v)}
-            min={1}
-            step={1}
-            unit="minutes"
           />
         </Field>
       </Section>

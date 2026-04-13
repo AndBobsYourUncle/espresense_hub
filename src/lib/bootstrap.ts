@@ -1,7 +1,9 @@
 import {
   AUTO_APPLY_INITIAL_DELAY_MS,
   AUTO_APPLY_INTERVAL_MS,
+  isAutoApplyEnabled,
   runAutoApplyCycle,
+  setAutoApplyConfig,
 } from "@/lib/calibration/auto_apply";
 import { refreshNodePairFits } from "@/lib/calibration/autofit";
 import { loadAuditState, saveAuditState } from "@/lib/state/audit_persistence";
@@ -85,6 +87,27 @@ export async function bootstrap(): Promise<void> {
         `smoothing_weight=${config.filtering.smoothing_weight}`,
     );
 
+    // Apply auto-apply config. The loop runs only when:
+    //   - `optimization.enabled` is true (master switch), AND
+    //   - `optimization.optimizer` is `streaming_per_pair` (our
+    //     pipeline). The upstream companion's optimizer values
+    //     (per_node_absorption, global_absorption, legacy) are not
+    //     implemented here, so picking one effectively disables
+    //     auto-apply rather than silently doing the wrong thing.
+    const isOurOptimizer =
+      config.optimization.optimizer === "streaming_per_pair";
+    const autoApplyOn = config.optimization.enabled && isOurOptimizer;
+    setAutoApplyConfig({
+      enabled: autoApplyOn,
+      intervalSecs: config.optimization.interval_secs,
+    });
+    console.log(
+      `[bootstrap] auto-apply enabled=${autoApplyOn} ` +
+        `(switch=${config.optimization.enabled}, ` +
+        `optimizer=${config.optimization.optimizer}) ` +
+        `interval=${config.optimization.interval_secs}s`,
+    );
+
     // Load persisted state from disk before MQTT starts pushing
     // messages — calibration restored, device biases ready, system
     // continues from where it left off.
@@ -133,20 +156,25 @@ export async function bootstrap(): Promise<void> {
       }
     }, PAIR_FITS_REFRESH_MS);
 
-    // Online absorption auto-apply: every 5 min, push small drift
+    // Online absorption auto-apply: every interval, push small drift
     // corrections to firmware so calibration converges automatically.
     // First run delayed 1 min so the streaming stats have time to
-    // accumulate after a fresh restart.
-    setTimeout(() => {
-      runAutoApplyCycle().catch((err) =>
-        console.error("[bootstrap] initial auto-apply failed", err),
-      );
-      setInterval(() => {
+    // accumulate after a fresh restart. Skipped entirely when the
+    // user has disabled it via `optimization.enabled: false`.
+    if (isAutoApplyEnabled()) {
+      setTimeout(() => {
         runAutoApplyCycle().catch((err) =>
-          console.error("[bootstrap] auto-apply cycle failed", err),
+          console.error("[bootstrap] initial auto-apply failed", err),
         );
-      }, AUTO_APPLY_INTERVAL_MS);
-    }, AUTO_APPLY_INITIAL_DELAY_MS);
+        setInterval(() => {
+          runAutoApplyCycle().catch((err) =>
+            console.error("[bootstrap] auto-apply cycle failed", err),
+          );
+        }, AUTO_APPLY_INTERVAL_MS);
+      }, AUTO_APPLY_INITIAL_DELAY_MS);
+    } else {
+      console.log("[bootstrap] auto-apply disabled by config");
+    }
 
     // Periodic calibration save — every 60 s the streaming stats,
     // sample buffer, and residual aggregators get flushed to disk so

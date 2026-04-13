@@ -38,9 +38,33 @@ const N_MAX = 7.0;
 /** Per-node minimum gap between auto-applies. */
 export const PER_NODE_RATE_LIMIT_MS = 10 * 60_000;
 
-/** How often the auto-apply check runs. */
-export const AUTO_APPLY_INTERVAL_MS = 5 * 60_000;
+/**
+ * How often the auto-apply check runs. Mutable — settable from
+ * `optimization.interval_secs` in config.yaml at bootstrap. Defaults
+ * to 5 min, which is much faster than the upstream companion's
+ * 1-hour default but matches our streaming-stats philosophy (apply
+ * small corrections often, not big ones rarely).
+ */
+export let AUTO_APPLY_INTERVAL_MS = 5 * 60_000;
 export const AUTO_APPLY_INITIAL_DELAY_MS = 60_000;
+
+/** Whether the auto-apply background job runs at all. */
+let autoApplyEnabled = true;
+
+/** Configure auto-apply from the `optimization` config block. */
+export function setAutoApplyConfig(opts: {
+  enabled: boolean;
+  intervalSecs: number;
+}): void {
+  autoApplyEnabled = opts.enabled;
+  if (opts.intervalSecs > 0 && Number.isFinite(opts.intervalSecs)) {
+    AUTO_APPLY_INTERVAL_MS = opts.intervalSecs * 1000;
+  }
+}
+
+export function isAutoApplyEnabled(): boolean {
+  return autoApplyEnabled;
+}
 
 /** Track when each node was last auto-applied so we can rate-limit. */
 const lastAutoApplyByNode = new Map<string, number>();
@@ -105,6 +129,7 @@ export function restoreAutoApplyState(snap: AutoApplyStateSnapshot): void {
  * Returns the events that were applied (for logging / testing).
  */
 export async function runAutoApplyCycle(): Promise<AutoApplyEvent[]> {
+  if (!autoApplyEnabled) return [];
   const store = getStore();
   const fits = fitAllNodes(store);
   const now = Date.now();
