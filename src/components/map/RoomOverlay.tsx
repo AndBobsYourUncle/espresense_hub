@@ -12,22 +12,52 @@ interface Props {
   transform: FloorTransform;
 }
 
-const ARROW_COLOR = "#14b8a6"; // teal-500
+const ARROW_COLOR = "#14b8a6";
 const ARROW_STROKE = 0.05;
 const MARKER_ID = "room-conn-arrow";
 
-/**
- * SVG overlay rendered inside FloorPlan that activates in two modes:
- *
- *  - `room-relations` tool: highlights the selected room (blue) and draws
- *    arrows from its centroid to each connected room's centroid. Other rooms
- *    get a faint tint so they read as clickable.
- *
- *  - `presence-zones` tool: colors rooms by zone membership and makes rooms
- *    clickable to toggle their membership in the selected zone.
- *
- * Hidden when neither tool is active.
- */
+const GROUP_COLORS = [
+  "#f59e0b", // amber-500
+  "#ec4899", // pink-500
+  "#f97316", // orange-500
+  "#84cc16", // lime-500
+  "#a78bfa", // violet-400
+  "#fb7185", // rose-400
+];
+
+// ─── Convex hull (Andrew's monotone chain) ────────────────────────────────────
+
+function cross(
+  O: readonly [number, number],
+  A: readonly [number, number],
+  B: readonly [number, number],
+): number {
+  return (A[0] - O[0]) * (B[1] - O[1]) - (A[1] - O[1]) * (B[0] - O[0]);
+}
+
+function convexHull(points: readonly (readonly [number, number])[]): [number, number][] {
+  if (points.length < 3) return points.map((p) => [p[0], p[1]]);
+  const pts = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]) as [number, number][];
+  const lower: [number, number][] = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0)
+      lower.pop();
+    lower.push(p);
+  }
+  const upper: [number, number][] = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0)
+      upper.pop();
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  return [...lower, ...upper];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function RoomOverlay({ floor, transform }: Props) {
   const { activeTool } = useMapTool();
   const relations = useRoomRelations();
@@ -36,7 +66,7 @@ export default function RoomOverlay({ floor, transform }: Props) {
   const isRelationsMode = activeTool === "room-relations";
   const isZonesMode = activeTool === "presence-zones";
 
-  // Pre-compute polygon geometry — must be before any conditional return.
+  // Room polygon geometry — before any conditional return.
   const roomPolygons = useMemo(() => {
     return floor.rooms.map((room, i) => {
       if (!room.points || room.points.length < 3) return null;
@@ -44,26 +74,47 @@ export default function RoomOverlay({ floor, transform }: Props) {
         .map(([x, y]) => `${tx(transform, x)},${ty(transform, y)}`)
         .join(" ");
       const [cx, cy] = polygonCentroid(room.points);
-      return {
-        room,
-        idx: i,
-        pts,
-        sx: tx(transform, cx),
-        sy: ty(transform, cy),
-      };
+      return { room, idx: i, pts, sx: tx(transform, cx), sy: ty(transform, cy) };
     });
   }, [floor.rooms, transform]);
 
-  // Zone membership lookup — computed unconditionally for stable hook order.
+  // Zone membership lookup — unconditional for stable hook order.
   const roomZoneMap = useMemo(() => {
     const m = new Map<string, number>();
     zones.draftZones.forEach((z, i) => {
-      for (const r of z.rooms) {
-        if (!m.has(r)) m.set(r, i);
-      }
+      for (const r of z.rooms) { if (!m.has(r)) m.set(r, i); }
     });
     return m;
   }, [zones.draftZones]);
+
+  // floor_area group → colour (by first-seen order).
+  const groupColorMap = useMemo(() => {
+    const m = new Map<string, string>();
+    let n = 0;
+    for (const room of floor.rooms) {
+      if (room.floor_area && !m.has(room.floor_area))
+        m.set(room.floor_area, GROUP_COLORS[n++ % GROUP_COLORS.length]);
+    }
+    return m;
+  }, [floor.rooms]);
+
+  // Convex hull per floor_area group, in SVG coordinates.
+  const groupHulls = useMemo(() => {
+    const groups = new Map<string, [number, number][]>();
+    for (const room of floor.rooms) {
+      if (!room.floor_area || !room.points) continue;
+      const pts = groups.get(room.floor_area) ?? [];
+      for (const p of room.points) pts.push([p[0], p[1]]);
+      groups.set(room.floor_area, pts);
+    }
+    return [...groups.entries()].map(([tag, pts]) => {
+      const hull = convexHull(pts);
+      const svgPts = hull
+        .map(([x, y]) => `${tx(transform, x)},${ty(transform, y)}`)
+        .join(" ");
+      return { tag, svgPts, color: groupColorMap.get(tag) ?? GROUP_COLORS[0] };
+    });
+  }, [floor.rooms, groupColorMap, transform]);
 
   if (!isRelationsMode && !isZonesMode) return null;
 
@@ -72,14 +123,15 @@ export default function RoomOverlay({ floor, transform }: Props) {
     : -1;
   const selectedZone = selectedZoneIdx >= 0 ? zones.draftZones[selectedZoneIdx] : null;
 
-  // Find the selected room's centroid for arrow origins.
-  const selectedEntry = isRelationsMode && relations.editingRoomId
-    ? roomPolygons.find((e) => e?.room.id === relations.editingRoomId) ?? null
-    : null;
+  const selectedEntry =
+    isRelationsMode && relations.editingRoomId
+      ? (roomPolygons.find((e) => e?.room.id === relations.editingRoomId) ?? null)
+      : null;
+
+  const activeDraftGroup = relations.draftFloorArea.trim();
 
   return (
     <>
-      {/* Arrowhead marker for room-relations mode */}
       {isRelationsMode && (
         <defs>
           <marker
@@ -96,8 +148,30 @@ export default function RoomOverlay({ floor, transform }: Props) {
         </defs>
       )}
 
-      <g className="room-overlay" style={{ cursor: "pointer" }}>
-        {/* Room hit-area / fill overlays */}
+      <g className="room-overlay" style={{ cursor: isRelationsMode || isZonesMode ? "pointer" : "default" }}>
+
+        {/* ── Floor-area group hulls (relations mode only) ─────────────────── */}
+        {isRelationsMode && (
+          <g style={{ pointerEvents: "none" }}>
+            {groupHulls.map(({ tag, svgPts, color }) => {
+              const isActiveGroup = activeDraftGroup !== "" && tag === activeDraftGroup;
+              return (
+                <polygon
+                  key={`hull-${tag}`}
+                  points={svgPts}
+                  fill={isActiveGroup ? color : "none"}
+                  fillOpacity={isActiveGroup ? 0.12 : 0}
+                  stroke={color}
+                  strokeWidth={0.07}
+                  strokeDasharray="0.18 0.1"
+                  strokeLinejoin="round"
+                />
+              );
+            })}
+          </g>
+        )}
+
+        {/* ── Room hit-area / fill overlays ────────────────────────────────── */}
         {roomPolygons.map((entry) => {
           if (!entry) return null;
           const { room, idx, pts } = entry;
@@ -112,31 +186,26 @@ export default function RoomOverlay({ floor, transform }: Props) {
           if (isRelationsMode) {
             const isSelected = rid === relations.editingRoomId;
             if (isSelected) {
-              fill = "#3b82f6"; // blue-500
+              fill = "#3b82f6";
               fillOpacity = 0.4;
               stroke = "#1d4ed8";
               strokeWidth = 0.06;
             } else {
-              // Subtle tint so the user can see every room is clickable.
               fill = "#6b7280";
               fillOpacity = relations.editingRoomId ? 0.08 : 0;
             }
           } else if (isZonesMode) {
             const isInSelectedZone = selectedZone?.rooms.includes(rid) ?? false;
             const zoneIdx = roomZoneMap.get(rid);
-
             if (isInSelectedZone) {
               const color = ZONE_COLORS[selectedZoneIdx % ZONE_COLORS.length];
-              fill = color;
-              fillOpacity = 0.5;
-              stroke = color;
-              strokeWidth = 0.06;
+              fill = color; fillOpacity = 0.5;
+              stroke = color; strokeWidth = 0.06;
             } else if (zoneIdx !== undefined) {
               fill = ZONE_COLORS[zoneIdx % ZONE_COLORS.length];
               fillOpacity = 0.15;
             } else {
-              fill = "#6b7280";
-              fillOpacity = 0.08;
+              fill = "#6b7280"; fillOpacity = 0.08;
             }
           }
 
@@ -166,30 +235,35 @@ export default function RoomOverlay({ floor, transform }: Props) {
               strokeLinejoin="round"
               onClick={handleClick}
             >
-              <title>{room.name ?? room.id}</title>
+              <title>
+                {room.name ?? room.id}
+                {room.floor_area ? ` · group: ${room.floor_area}` : ""}
+              </title>
             </polygon>
           );
         })}
 
-        {/* Connection arrows — room-relations mode only */}
-        {isRelationsMode && selectedEntry && relations.draftOpenTo.map((connId) => {
-          const connEntry = roomPolygons.find((e) => e?.room.id === connId);
-          if (!connEntry) return null;
-          return (
-            <line
-              key={`conn-${connId}`}
-              x1={selectedEntry.sx}
-              y1={selectedEntry.sy}
-              x2={connEntry.sx}
-              y2={connEntry.sy}
-              stroke={ARROW_COLOR}
-              strokeWidth={ARROW_STROKE}
-              strokeLinecap="round"
-              markerEnd={`url(#${MARKER_ID})`}
-              style={{ pointerEvents: "none" }}
-            />
-          );
-        })}
+        {/* ── Connection arrows ─────────────────────────────────────────────── */}
+        {isRelationsMode &&
+          selectedEntry &&
+          relations.draftOpenTo.map((connId) => {
+            const connEntry = roomPolygons.find((e) => e?.room.id === connId);
+            if (!connEntry) return null;
+            return (
+              <line
+                key={`conn-${connId}`}
+                x1={selectedEntry.sx}
+                y1={selectedEntry.sy}
+                x2={connEntry.sx}
+                y2={connEntry.sy}
+                stroke={ARROW_COLOR}
+                strokeWidth={ARROW_STROKE}
+                strokeLinecap="round"
+                markerEnd={`url(#${MARKER_ID})`}
+                style={{ pointerEvents: "none" }}
+              />
+            );
+          })}
       </g>
     </>
   );
