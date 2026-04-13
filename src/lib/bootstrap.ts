@@ -100,12 +100,14 @@ export async function bootstrap(): Promise<void> {
     setAutoApplyConfig({
       enabled: autoApplyOn,
       intervalSecs: config.optimization.interval_secs,
+      minDelta: config.optimization.min_delta,
     });
     console.log(
       `[bootstrap] auto-apply enabled=${autoApplyOn} ` +
         `(switch=${config.optimization.enabled}, ` +
         `optimizer=${config.optimization.optimizer}) ` +
-        `interval=${config.optimization.interval_secs}s`,
+        `interval=${config.optimization.interval_secs}s ` +
+        `min_delta=${config.optimization.min_delta}`,
     );
 
     // Load persisted state from disk before MQTT starts pushing

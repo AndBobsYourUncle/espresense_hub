@@ -915,7 +915,7 @@ function FilteringTab({ doc, setField }: DocProps) {
 
       <Section
         title="Auto-apply"
-        description="Background loop that pushes small calibration deltas to firmware over MQTT. Per-node rate limit (10 min) and minimum delta (0.05) gate every push. Service restart required."
+        description="Background loop that pushes small calibration deltas to firmware over MQTT. Per-node rate limit (10 min) and minimum delta gate every push. Service restart required."
       >
         <Field
           label="Algorithm"
@@ -977,6 +977,17 @@ function FilteringTab({ doc, setField }: DocProps) {
             min={60}
             step={60}
             unit="seconds"
+          />
+        </Field>
+        <Field
+          label="Minimum delta"
+          hint="Smallest change in path-loss exponent that triggers an MQTT push. Default 0.10. Lower values (e.g. 0.05) track every tiny drift in the audit log but churn NVS flash writes on the ESP32; higher (0.15–0.20) keeps logs and flash writes quieter at the cost of slightly slower convergence. A 0.05 shift in exponent moves distance estimates only ~2–4% at typical ranges."
+        >
+          <NumberInput
+            value={get<number>(doc, ["optimization", "min_delta"], 0.1)}
+            onChange={(v) => setField(["optimization", "min_delta"], v)}
+            min={0.01}
+            step={0.01}
           />
         </Field>
       </Section>

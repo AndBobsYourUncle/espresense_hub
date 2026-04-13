@@ -34,6 +34,11 @@ optimization:
   enabled: true
   optimizer: per_node_absorption
   interval_secs: 3600
+  # Minimum |Δ| in path-loss exponent to bother publishing to firmware.
+  # 0.10 is above the regression's own sampling noise — raise to 0.15+
+  # for quieter audit logs and fewer NVS flash writes, drop to 0.05 to
+  # track every micro-drift.
+  min_delta: 0.1
 
 locators:
   nadaraya_watson:

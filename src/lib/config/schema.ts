@@ -88,6 +88,21 @@ export const OptimizationSchema = z
      */
     interval_secs: z.number().int().default(300),
     /**
+     * Minimum |Δ| in path-loss exponent for the auto-apply loop to
+     * publish an update to firmware. Changes smaller than this get
+     * silently skipped — they don't meaningfully affect distance
+     * estimates (a Δ of 0.05 in n shifts the estimate ~2–4 % at typical
+     * ranges) and they churn NVS flash writes on the ESP32 for no gain.
+     *
+     * Default 0.10 — safely above the regression's own sampling noise
+     * so the system only publishes when the fit has actually drifted,
+     * not when the ring buffer rotated through slightly different
+     * samples. Set lower (e.g. 0.05) if you want to track every tiny
+     * drift in the audit log; higher (0.15–0.20) for quieter logs and
+     * fewer flash writes at the cost of slower convergence.
+     */
+    min_delta: z.number().default(0.1),
+    /**
      * Upstream-companion field — parsed for back-compat but ignored.
      * Our calibration UI shows live state, not historical snapshots.
      */

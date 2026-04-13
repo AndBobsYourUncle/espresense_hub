@@ -25,8 +25,12 @@ import { getStore } from "@/lib/state/store";
  * step 10 min later) → 2.68 → 2.69 → settles, no more updates.
  */
 
-/** Minimum |Δ| to bother publishing. Sub-noise changes get ignored. */
-const DELTA_THRESHOLD = 0.05;
+/**
+ * Default minimum |Δ| to publish. Runtime value is configurable via
+ * `optimization.min_delta`; this is the fallback when state is fresh
+ * (e.g. before bootstrap applies config).
+ */
+const DEFAULT_DELTA_THRESHOLD = 0.1;
 
 /** Maximum |Δ| we'll publish in a single update. */
 const MAX_SINGLE_STEP = 1.0;
@@ -50,6 +54,8 @@ export const PER_NODE_RATE_LIMIT_MS = 10 * 60_000;
 interface AutoApplyState {
   intervalMs: number;
   enabled: boolean;
+  /** Minimum |Δ| (path-loss exponent) to publish. Configurable. */
+  minDelta: number;
   /** Per-node rate-limit timestamps (epoch ms of most recent push). */
   lastByNode: Map<string, number>;
   /** Recent push events, newest first. Bounded to AUDIT_LOG_MAX. */
@@ -63,6 +69,7 @@ function state(): AutoApplyState {
     globalForAutoApply.__espresenseAutoApplyState = {
       intervalMs: 5 * 60_000,
       enabled: true,
+      minDelta: DEFAULT_DELTA_THRESHOLD,
       lastByNode: new Map(),
       auditLog: [],
     };
@@ -83,15 +90,24 @@ export function isAutoApplyEnabled(): boolean {
   return state().enabled;
 }
 
+/** Current minimum |Δ| threshold in path-loss-exponent units. */
+export function getAutoApplyMinDelta(): number {
+  return state().minDelta;
+}
+
 /** Configure auto-apply from the `optimization` config block. */
 export function setAutoApplyConfig(opts: {
   enabled: boolean;
   intervalSecs: number;
+  minDelta: number;
 }): void {
   const s = state();
   s.enabled = opts.enabled;
   if (opts.intervalSecs > 0 && Number.isFinite(opts.intervalSecs)) {
     s.intervalMs = opts.intervalSecs * 1000;
+  }
+  if (opts.minDelta > 0 && Number.isFinite(opts.minDelta)) {
+    s.minDelta = opts.minDelta;
   }
 }
 
@@ -173,7 +189,7 @@ export async function runAutoApplyCycle(): Promise<AutoApplyEvent[]> {
     const absDelta = Math.abs(delta);
 
     // Skip changes too small to matter.
-    if (absDelta < DELTA_THRESHOLD) continue;
+    if (absDelta < state().minDelta) continue;
 
     // Sanity: clamp to safe physical range.
     if (
