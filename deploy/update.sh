@@ -56,6 +56,18 @@ log() { echo -e "\033[1;34m==>\033[0m $*"; }
 
 log "Updating $INSTALL_DIR (branch $BRANCH)"
 
+# Preflight: ensure the entire repo is owned by SERVICE_USER. A stray
+# manual `sudo git pull` (or any other sudo-from-the-repo operation)
+# leaves new files owned by root, which then breaks the next
+# `sudo -u espresense git fetch` with "insufficient permission for
+# adding an object to repository database .git/objects". Auto-fix it
+# silently — there's no legitimate reason for any file in here to be
+# owned by anyone other than the service user.
+if find "$INSTALL_DIR" -not -user "$SERVICE_USER" -print -quit 2>/dev/null | grep -q .; then
+  log "Found files not owned by $SERVICE_USER — fixing ownership…"
+  chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
+fi
+
 sudo -u "$SERVICE_USER" -H git -C "$INSTALL_DIR" fetch origin
 
 OLD_SHA="$(sudo -u "$SERVICE_USER" -H git -C "$INSTALL_DIR" rev-parse HEAD)"
