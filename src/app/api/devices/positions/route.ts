@@ -31,6 +31,22 @@ export interface DevicePositionDTO {
    * accumulate.
    */
   rawPosition?: { x: number; y: number; z: number };
+  /**
+   * Position currently published by upstream ESPresense-companion
+   * (when running alongside us). Lets the compare view render an
+   * apples-to-apples ghost marker — same MQTT data, different
+   * pipeline. Direct visual measurement of how much our pipeline
+   * improves over upstream's.
+   */
+  upstreamPosition?: {
+    x: number;
+    y: number;
+    z?: number;
+    confidence: number;
+    fixes: number;
+    scenario?: string;
+    lastSeen: number;
+  };
 }
 
 export interface DevicePositionsResponse {
@@ -56,6 +72,17 @@ export function GET() {
       computedAt: d.position.computedAt,
       alternatives: d.position.alternatives,
       rawPosition: d.position.rawPosition,
+      upstreamPosition: d.upstreamPosition
+        ? {
+            x: d.upstreamPosition.x,
+            y: d.upstreamPosition.y,
+            z: d.upstreamPosition.z,
+            confidence: d.upstreamPosition.confidence,
+            fixes: d.upstreamPosition.fixes,
+            scenario: d.upstreamPosition.scenario,
+            lastSeen: d.upstreamPosition.lastSeen,
+          }
+        : undefined,
     });
   }
   const body: DevicePositionsResponse = {

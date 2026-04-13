@@ -86,6 +86,21 @@ export interface DevicePosition {
   alternatives?: AlternativePosition[];
 }
 
+export interface UpstreamPosition {
+  x: number;
+  y: number;
+  z?: number;
+  /** 0..1 (we normalize from the upstream companion's 0..100). */
+  confidence: number;
+  fixes: number;
+  /** Companion's name for the locator/scenario it picked. */
+  scenario?: string;
+  /** When the companion last produced this fix, ms epoch. */
+  lastSeen: number;
+  /** When *we* received the MQTT message, ms epoch. */
+  receivedAt: number;
+}
+
 export interface DeviceState {
   id: string;
   name?: string;
@@ -101,6 +116,13 @@ export interface DeviceState {
    * is `kalman` (the default). EMA mode leaves this undefined.
    */
   kalman?: import("./kalman").KalmanState;
+  /**
+   * Latest position published by upstream ESPresense-companion when
+   * running on the same broker. Lets the compare view render an
+   * apples-to-apples ghost marker on identical input data — direct
+   * visual measurement of how much our pipeline improves on upstream.
+   */
+  upstreamPosition?: UpstreamPosition;
 }
 
 export interface MqttConnectionState {
@@ -446,6 +468,29 @@ export class Store {
       // diagnosing whether smoothing is responsible for an artifact.
       d.position = position;
     }
+  }
+
+  /**
+   * Record the latest upstream-companion position for a device. Creates
+   * the device record if it doesn't exist yet — companion may know
+   * about devices we haven't seen our own measurements from yet (or
+   * stale retained ones). We DON'T touch `lastSeen` here — that's
+   * driven by our own MQTT measurement traffic, not by upstream.
+   */
+  setDeviceUpstreamPosition(deviceId: string, pos: UpstreamPosition): void {
+    let d = this.devices.get(deviceId);
+    if (!d) {
+      // Companion is tracking a device we don't have measurements for
+      // (yet). Create a minimal placeholder so the position can attach.
+      d = {
+        id: deviceId,
+        firstSeen: Date.now(),
+        lastSeen: 0,
+        measurements: new Map(),
+      };
+      this.devices.set(deviceId, d);
+    }
+    d.upstreamPosition = pos;
   }
 
   setMqttStatus(next: Partial<MqttConnectionState>): void {

@@ -94,6 +94,47 @@ export default function DeviceMarkers({
 
   return (
     <g>
+      {/* Upstream-companion ghost — only when compare mode is on AND
+          upstream-companion is publishing positions on the same broker.
+          Slate gray to read as "external reference". The dashed line
+          to our active marker is the headline visual: the magnitude of
+          the offset IS the per-frame benefit our pipeline buys you. */}
+      {compareMode &&
+        visible.map((d) => {
+          if (!d.upstreamPosition) return null;
+          const sx = tx(transform, d.x);
+          const sy = ty(transform, d.y);
+          const ux = tx(transform, d.upstreamPosition.x);
+          const uy = ty(transform, d.upstreamPosition.y);
+          const color = colorForLocator("upstream_companion");
+          return (
+            <g
+              key={`upstream-${d.id}`}
+              className="fp-device-ghost pointer-events-none"
+            >
+              <line
+                x1={sx}
+                y1={sy}
+                x2={ux}
+                y2={uy}
+                stroke={color}
+                strokeWidth={0.04}
+                strokeOpacity={0.7}
+                strokeDasharray="0.1 0.08"
+              />
+              <circle
+                cx={ux}
+                cy={uy}
+                r={0.13}
+                fill="none"
+                stroke={color}
+                strokeWidth={0.05}
+                strokeOpacity={0.95}
+              />
+            </g>
+          );
+        })}
+
       {/* Per-locator ghost markers + connecting lines, drawn under the
           primary markers so they don't intercept clicks. One ghost per
           alternative locator, color-coded by algorithm. */}

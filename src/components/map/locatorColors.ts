@@ -11,6 +11,7 @@ export const LOCATOR_COLORS: Record<string, string> = {
   mle: "#f472b6", // pink-400
   nearest_node: "#fbbf24", // amber-400
   room_aware: "#f97316", // orange-500 (the active marker)
+  upstream_companion: "#64748b", // slate-500 — neutral, signals "external reference"
 };
 
 export const LOCATOR_LABELS: Record<string, string> = {
@@ -20,6 +21,7 @@ export const LOCATOR_LABELS: Record<string, string> = {
   mle: "MLE",
   nearest_node: "Nearest",
   room_aware: "Room-Aware",
+  upstream_companion: "Upstream",
 };
 
 export function colorForLocator(name: string): string {

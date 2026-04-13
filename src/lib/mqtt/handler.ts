@@ -144,6 +144,45 @@ export function attachHandlers(client: MqttClient, config: Config): void {
       return;
     }
 
+    if (match.kind === "companion-attributes") {
+      // Position published by upstream ESPresense-companion (when
+      // running alongside us on the same broker). We just record it
+      // — it doesn't drive any of our solving, just gets surfaced as
+      // a compare-mode ghost marker. Tolerant parser: companion's
+      // payload format has varied across versions.
+      const a = json as Record<string, unknown>;
+      const x = typeof a.x === "number" ? a.x : null;
+      const y = typeof a.y === "number" ? a.y : null;
+      if (x === null || y === null) return;
+      const z = typeof a.z === "number" ? a.z : undefined;
+      // Companion confidence is 0–100; normalize to our 0–1 scale.
+      const confRaw = typeof a.confidence === "number" ? a.confidence : 0;
+      const confidence = Math.max(0, Math.min(1, confRaw / 100));
+      const fixes = typeof a.fixes === "number" ? Math.round(a.fixes) : 0;
+      const scenario =
+        typeof a.best_scenario === "string" ? a.best_scenario : undefined;
+      let lastSeen = Date.now();
+      if (typeof a.last_seen === "string") {
+        const parsed = Date.parse(a.last_seen);
+        if (Number.isFinite(parsed)) lastSeen = parsed;
+      }
+      // Skip stale retained messages (more than a day old). Companion
+      // retains positions for devices it tracked weeks ago; we don't
+      // want those polluting the live compare view.
+      if (Date.now() - lastSeen > 24 * 60 * 60 * 1000) return;
+      store.setDeviceUpstreamPosition(match.deviceId, {
+        x,
+        y,
+        z,
+        confidence,
+        fixes,
+        scenario,
+        lastSeen,
+        receivedAt: Date.now(),
+      });
+      return;
+    }
+
     if (match.kind === "device-config") {
       // Per-device config from `espresense/settings/{originalId}/config`.
       // The topic's deviceId is the original ID (IRK); the payload's `id`

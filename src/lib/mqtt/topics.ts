@@ -17,7 +17,8 @@ export type ParsedTopic =
   | { kind: "node-status"; nodeId: string }
   | { kind: "node-setting"; nodeId: string; key: string }
   | { kind: "device-message"; deviceId: string; nodeId: string }
-  | { kind: "device-config"; deviceId: string };
+  | { kind: "device-config"; deviceId: string }
+  | { kind: "companion-attributes"; deviceId: string };
 
 export function parseTopic(topic: string): ParsedTopic | null {
   const parts = topic.split("/");
@@ -58,6 +59,22 @@ export function parseTopic(topic: string): ParsedTopic | null {
     return { kind: "device-config", deviceId };
   }
 
+  // espresense/companion/{deviceId}/attributes — published by the
+  // upstream ESPresense-companion app (when running alongside us). Lets
+  // the compare-mode UI render upstream's *live* position estimate as a
+  // ghost marker for direct apples-to-apples comparison on the same
+  // MQTT data. We ignore the leaf-only `espresense/companion/{deviceId}`
+  // (room name) — the attributes payload contains everything we need.
+  if (
+    parts[1] === "companion" &&
+    parts.length === 4 &&
+    parts[3] === "attributes"
+  ) {
+    const deviceId = parts[2];
+    if (!deviceId) return null;
+    return { kind: "companion-attributes", deviceId };
+  }
+
   return null;
 }
 
@@ -72,4 +89,7 @@ export const SUBSCRIPTIONS = [
   `${TOPIC_PREFIX}/rooms/+/+`,
   `${TOPIC_PREFIX}/devices/+/+`,
   `${TOPIC_PREFIX}/settings/+/config`,
+  // Optional — only sees traffic when upstream-companion is running on
+  // the same broker. Payloads end up as compare-mode ghost markers.
+  `${TOPIC_PREFIX}/companion/+/attributes`,
 ] as const;
