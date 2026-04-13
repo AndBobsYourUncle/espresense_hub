@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import type { Floor } from "@/lib/config";
-import { polygonCentroid, tx, ty, type FloorTransform } from "@/lib/map/geometry";
+import { polygonCentroid, tx, ty, txInv, tyInv, type FloorTransform } from "@/lib/map/geometry";
 import { useMapTool } from "./MapToolProvider";
 import { usePresenceZones, ZONE_COLORS } from "./PresenceZonesProvider";
 import { useRoomRelations } from "./RoomRelationsProvider";
@@ -173,6 +173,8 @@ function rasterBoundary(
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+const DOOR_MARKER_R = 0.1; // half-size of the door diamond, in map metres
+
 export default function RoomOverlay({ floor, transform }: Props) {
   const { activeTool } = useMapTool();
   const relations = useRoomRelations();
@@ -237,6 +239,25 @@ export default function RoomOverlay({ floor, transform }: Props) {
       };
     });
   }, [floor.rooms, groupColorMap, transform]);
+
+  // Door placement: convert a click's screen coords to map-space and call setDoor.
+  const handleDoorPlacementClick = useCallback(
+    (e: React.MouseEvent<SVGRectElement>) => {
+      e.stopPropagation();
+      const rid = relations.doorPlacingForRoom;
+      if (!rid) return;
+      const svg = (e.currentTarget as SVGElement).ownerSVGElement;
+      if (!svg) return;
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX;
+      pt.y = e.clientY;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      const svgPt = pt.matrixTransform(ctm.inverse());
+      relations.setDoor(rid, [txInv(transform, svgPt.x), tyInv(transform, svgPt.y)]);
+    },
+    [relations, transform],
+  );
 
   if (!isRelationsMode && !isZonesMode) return null;
 
@@ -386,6 +407,56 @@ export default function RoomOverlay({ floor, transform }: Props) {
               />
             );
           })}
+
+        {/* ── Door markers ─────────────────────────────────────────────────── */}
+        {isRelationsMode &&
+          Object.entries(relations.draftDoors).map(([rid, [doorX, doorY]]) => {
+            const sx = tx(transform, doorX);
+            const sy = ty(transform, doorY);
+            const r = DOOR_MARKER_R;
+            const isPlacing = relations.doorPlacingForRoom === rid;
+            return (
+              <g key={`door-${rid}`} style={{ pointerEvents: "none" }}>
+                {/* Glow ring while this door is being repositioned */}
+                {isPlacing && (
+                  <circle
+                    cx={sx} cy={sy}
+                    r={r + 0.12}
+                    fill="none"
+                    stroke="#0ea5e9"
+                    strokeWidth={0.03}
+                    opacity={0.5}
+                    className="animate-ping"
+                    style={{ transformOrigin: `${sx}px ${sy}px` }}
+                  />
+                )}
+                {/* Diamond marker */}
+                <polygon
+                  points={`${sx},${sy - r} ${sx + r},${sy} ${sx},${sy + r} ${sx - r},${sy}`}
+                  fill="#0ea5e9"
+                  stroke="white"
+                  strokeWidth={0.025}
+                  opacity={isPlacing ? 0.6 : 1}
+                />
+              </g>
+            );
+          })}
+
+        {/* ── Door placement capture rect (rendered LAST — on top of everything) */}
+        {isRelationsMode && relations.doorPlacingForRoom && (() => {
+          const b = transform.bounds;
+          return (
+            <rect
+              x={0}
+              y={0}
+              width={b.maxX - b.minX}
+              height={b.maxY - b.minY}
+              fill="transparent"
+              style={{ cursor: "crosshair" }}
+              onClick={handleDoorPlacementClick}
+            />
+          );
+        })()}
       </g>
     </>
   );

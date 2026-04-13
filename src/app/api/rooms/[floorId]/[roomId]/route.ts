@@ -30,9 +30,15 @@ export async function PATCH(
     return NextResponse.json({ error: "invalid json body" }, { status: 400 });
   }
 
-  if (!Array.isArray(body.open_to) || !body.open_to.every((v) => typeof v === "string")) {
+  const isValidOpenToEntry = (v: unknown): boolean =>
+    typeof v === "string" ||
+    (typeof v === "object" &&
+      v !== null &&
+      typeof (v as Record<string, unknown>).id === "string");
+
+  if (!Array.isArray(body.open_to) || !body.open_to.every(isValidOpenToEntry)) {
     return NextResponse.json(
-      { error: "`open_to` must be an array of strings" },
+      { error: "`open_to` must be an array of strings or {id, door?} objects" },
       { status: 400 },
     );
   }
@@ -58,7 +64,7 @@ export async function PATCH(
     await updateRoomRelations(
       floorId,
       roomId,
-      body.open_to as string[],
+      body.open_to as Array<string | { id: string; door?: [number, number] }>,
       body.floor_area as string | null | undefined,
       removeFromRooms,
     );

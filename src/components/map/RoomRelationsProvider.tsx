@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import type { Room } from "@/lib/config";
+import { openToId, openToDoor } from "@/lib/config/schema";
 import { useMapTool } from "./MapToolProvider";
 
 /** Resolve a label (id or name) to the canonical room id. */
@@ -33,18 +34,31 @@ interface RoomRelationsContextValue {
    * reference in the other room's `open_to`.
    */
   draftOpenTo: string[];
+  /** Draft door positions keyed by connected room id. */
+  draftDoors: Record<string, [number, number]>;
   /** Draft value for `floor_area` tag. */
   draftFloorArea: string;
+  /**
+   * When non-null, the user is in door-placement mode: the next map click
+   * will record the door position for this room id.
+   */
+  doorPlacingForRoom: string | null;
   /** True while a save is in flight. */
   saving: boolean;
   /** Last save error, or null. */
   error: string | null;
   /** Open the editor for a room, seeded from its current values. */
   startEditing: (floorId: string, room: Room, allRooms: Room[]) => void;
-  /** Toggle a room id in/out of draftOpenTo. */
+  /** Toggle a room id in/out of draftOpenTo. Clearing a connection also removes its door. */
   toggleOpenTo: (roomId: string) => void;
   /** Update the floor_area tag. */
   setFloorArea: (val: string) => void;
+  /** Record or clear a door position for a connected room. Pass null to remove. */
+  setDoor: (roomId: string, pos: [number, number] | null) => void;
+  /** Enter door-placement mode for a connected room. */
+  startDoorPlacing: (roomId: string) => void;
+  /** Exit door-placement mode without placing. */
+  stopDoorPlacing: () => void;
   /** Persist the draft to config.yaml. */
   save: () => Promise<void>;
   /** Discard the draft and close the editor. */
@@ -73,7 +87,9 @@ export default function RoomRelationsProvider({
   const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
   const [editingRoomName, setEditingRoomName] = useState<string | null>(null);
   const [draftOpenTo, setDraftOpenTo] = useState<string[]>([]);
+  const [draftDoors, setDraftDoors] = useState<Record<string, [number, number]>>({});
   const [draftFloorArea, setDraftFloorArea] = useState<string>("");
+  const [doorPlacingForRoom, setDoorPlacingForRoom] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /**
@@ -88,7 +104,9 @@ export default function RoomRelationsProvider({
     setEditingRoomId(null);
     setEditingRoomName(null);
     setDraftOpenTo([]);
+    setDraftDoors({});
     setDraftFloorArea("");
+    setDoorPlacingForRoom(null);
     setInitialReverseRefs([]);
     setError(null);
   }, []);
@@ -102,17 +120,22 @@ export default function RoomRelationsProvider({
     const id = room.id ?? null;
     if (!id) return;
 
-    // Normalize own open_to labels to room IDs.
-    const ownOpenTo = new Set(
-      (room.open_to ?? []).map((label) => resolveRoomId(label, allRooms)),
-    );
+    // Normalize own open_to labels to room IDs, and collect any stored door positions.
+    const ownOpenTo = new Set<string>();
+    const doors: Record<string, [number, number]> = {};
+    for (const entry of room.open_to ?? []) {
+      const resolvedId = resolveRoomId(openToId(entry), allRooms);
+      ownOpenTo.add(resolvedId);
+      const door = openToDoor(entry);
+      if (door) doors[resolvedId] = door;
+    }
 
     // Find rooms that list this room in THEIR open_to (reverse references).
     const reverseRefs: string[] = [];
     for (const r of allRooms) {
       if (!r.id || r.id === id) continue;
       const hasRef = (r.open_to ?? []).some(
-        (label) => resolveRoomId(label, allRooms) === id,
+        (entry) => resolveRoomId(openToId(entry), allRooms) === id,
       );
       if (hasRef) reverseRefs.push(r.id);
     }
@@ -127,19 +150,53 @@ export default function RoomRelationsProvider({
     setEditingRoomId(id);
     setEditingRoomName(room.name ?? id);
     setDraftOpenTo(effective);
+    setDraftDoors(doors);
     setInitialReverseRefs(reverseRefs);
     setDraftFloorArea(room.floor_area ?? "");
+    setDoorPlacingForRoom(null);
     setError(null);
   }, []);
 
   const toggleOpenTo = useCallback((roomId: string) => {
-    setDraftOpenTo((prev) =>
-      prev.includes(roomId) ? prev.filter((id) => id !== roomId) : [...prev, roomId],
-    );
-  }, []);
+    setDraftOpenTo((prev) => {
+      if (prev.includes(roomId)) {
+        // Removing connection — clear its door position too.
+        setDraftDoors((d) => {
+          if (!d[roomId]) return d;
+          const next = { ...d };
+          delete next[roomId];
+          return next;
+        });
+        if (doorPlacingForRoom === roomId) setDoorPlacingForRoom(null);
+        return prev.filter((id) => id !== roomId);
+      }
+      return [...prev, roomId];
+    });
+  }, [doorPlacingForRoom]);
 
   const setFloorArea = useCallback((val: string) => {
     setDraftFloorArea(val);
+  }, []);
+
+  const setDoor = useCallback((roomId: string, pos: [number, number] | null) => {
+    setDraftDoors((prev) => {
+      if (pos === null) {
+        if (!prev[roomId]) return prev;
+        const next = { ...prev };
+        delete next[roomId];
+        return next;
+      }
+      return { ...prev, [roomId]: pos };
+    });
+    setDoorPlacingForRoom(null); // exit door-placement mode after a placement
+  }, []);
+
+  const startDoorPlacing = useCallback((roomId: string) => {
+    setDoorPlacingForRoom(roomId);
+  }, []);
+
+  const stopDoorPlacing = useCallback(() => {
+    setDoorPlacingForRoom(null);
   }, []);
 
   const save = useCallback(async () => {
@@ -154,6 +211,12 @@ export default function RoomRelationsProvider({
       (rid) => !draftOpenTo.includes(rid),
     );
 
+    // Build open_to entries — plain string when no door, object when door is set.
+    const openToEntries = draftOpenTo.map((rid) => {
+      const door = draftDoors[rid];
+      return door ? { id: rid, door } : rid;
+    });
+
     try {
       const res = await fetch(
         `/api/rooms/${encodeURIComponent(editingFloorId)}/${encodeURIComponent(editingRoomId)}`,
@@ -161,7 +224,7 @@ export default function RoomRelationsProvider({
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            open_to: draftOpenTo,
+            open_to: openToEntries,
             floor_area: draftFloorArea.trim() || null,
             remove_from_rooms: removeFromRooms,
           }),
@@ -179,17 +242,22 @@ export default function RoomRelationsProvider({
     } finally {
       setSaving(false);
     }
-  }, [editingFloorId, editingRoomId, draftOpenTo, draftFloorArea, initialReverseRefs, cancel, router]);
+  }, [editingFloorId, editingRoomId, draftOpenTo, draftDoors, draftFloorArea, initialReverseRefs, cancel, router]);
 
-  // ESC to cancel.
+  // ESC: first exit door-placement mode; second press cancels editing.
   useEffect(() => {
     if (!editingRoomId) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") cancel();
+      if (e.key !== "Escape") return;
+      if (doorPlacingForRoom) {
+        setDoorPlacingForRoom(null);
+      } else {
+        cancel();
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [editingRoomId, cancel]);
+  }, [editingRoomId, doorPlacingForRoom, cancel]);
 
   return (
     <RoomRelationsContext.Provider
@@ -198,12 +266,17 @@ export default function RoomRelationsProvider({
         editingRoomId,
         editingRoomName,
         draftOpenTo,
+        draftDoors,
         draftFloorArea,
+        doorPlacingForRoom,
         saving,
         error,
         startEditing,
         toggleOpenTo,
         setFloorArea,
+        setDoor,
+        startDoorPlacing,
+        stopDoorPlacing,
         save,
         cancel,
       }}

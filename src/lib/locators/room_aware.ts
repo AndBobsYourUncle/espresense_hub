@@ -1,4 +1,5 @@
 import type { Node, Room } from "@/lib/config";
+import { openToId } from "@/lib/config/schema";
 import { getStore } from "@/lib/state/store";
 import type { Locator, LocatorResult, NodeFix } from "./types";
 
@@ -74,7 +75,7 @@ export class RoomAwareLocator implements Locator {
       const aId = r.id;
       if (!aId) continue;
       for (const ot of r.open_to) {
-        const bId = resolveRoom(ot);
+        const bId = resolveRoom(openToId(ot));
         if (!bId || bId === aId) continue;
         const key = aId < bId ? `${aId}|${bId}` : `${bId}|${aId}`;
         this.adjacentPairs.add(key);

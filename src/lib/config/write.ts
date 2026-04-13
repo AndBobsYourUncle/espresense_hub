@@ -2,7 +2,7 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { isMap, isSeq, parseDocument } from "yaml";
 import { resolveConfigPath } from "./load";
-import { ConfigSchema, slugify } from "./schema";
+import { ConfigSchema, openToId, slugify } from "./schema";
 
 /**
  * Round-trip-safe writer for `config.yaml`. Uses the `yaml` Document API so
@@ -266,7 +266,7 @@ export async function readRawConfig(): Promise<{
 export async function updateRoomRelations(
   floorId: string,
   roomId: string,
-  openTo: string[],
+  openTo: Array<string | { id: string; door?: [number, number] }>,
   floorArea: string | null | undefined,
   removeFromRooms: string[] = [],
 ): Promise<void> {
@@ -375,9 +375,10 @@ export async function updateRoomRelations(
       if (!eid || !removeSet.has(eid)) continue;
       const otherOpenTo = doc.getIn(["floors", floorIdx, "rooms", r, "open_to"]);
       if (!Array.isArray(otherOpenTo)) continue;
-      // Filter out any label that resolves to the editing roomId.
-      const filtered = (otherOpenTo as string[]).filter(
-        (label) => label !== roomId,
+      // Filter out any entry whose id resolves to the editing roomId.
+      // Entries may be strings or {id, door?} objects (mixed is fine).
+      const filtered = (otherOpenTo as Array<unknown>).filter(
+        (entry) => openToId(entry as string | { id: string }) !== roomId,
       );
       doc.setIn(["floors", floorIdx, "rooms", r, "open_to"], filtered);
     }

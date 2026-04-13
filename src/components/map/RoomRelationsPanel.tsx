@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Network, Save, X } from "lucide-react";
+import { Crosshair, Network, Save, X } from "lucide-react";
 import { useDraggable } from "@/lib/hooks/useDraggable";
 import type { Floor } from "@/lib/config";
 import { useMapTool } from "./MapToolProvider";
@@ -19,11 +19,16 @@ export default function RoomRelationsPanel({ floor }: Props) {
     editingRoomId,
     editingRoomName,
     draftOpenTo,
+    draftDoors,
     draftFloorArea,
+    doorPlacingForRoom,
     saving,
     error,
     toggleOpenTo,
     setFloorArea,
+    setDoor,
+    startDoorPlacing,
+    stopDoorPlacing,
     save,
     cancel,
   } = useRoomRelations();
@@ -135,6 +140,25 @@ export default function RoomRelationsPanel({ floor }: Props) {
                 Open to (doorways)
               </div>
             </div>
+
+            {/* Door placement hint */}
+            {doorPlacingForRoom && (
+              <div className="mx-4 mb-2 px-2.5 py-1.5 rounded-md bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 flex items-center gap-2">
+                <Crosshair className="h-3 w-3 text-sky-500 shrink-0" />
+                <span className="text-xs text-sky-700 dark:text-sky-300">
+                  Click the doorway on the map
+                </span>
+                <button
+                  type="button"
+                  onClick={stopDoorPlacing}
+                  className="ml-auto h-4 w-4 inline-flex items-center justify-center rounded text-sky-400 hover:text-sky-700 dark:hover:text-sky-200"
+                  aria-label="Cancel door placement"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+
             {otherRooms.length === 0 ? (
               <div className="px-4 py-2 text-xs text-zinc-400">
                 No other rooms on this floor.
@@ -143,28 +167,60 @@ export default function RoomRelationsPanel({ floor }: Props) {
               otherRooms.map((room) => {
                 const rid = room.id!;
                 const checked = draftOpenTo.includes(rid);
+                const hasDoor = Boolean(draftDoors[rid]);
+                const isPlacing = doorPlacingForRoom === rid;
                 return (
-                  <label
+                  <div
                     key={rid}
-                    className="flex items-center gap-3 px-4 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 cursor-pointer border-t border-zinc-100 dark:border-zinc-800/60 first:border-t-0"
+                    className="flex items-center gap-2 px-4 py-2 border-t border-zinc-100 dark:border-zinc-800/60 first:border-t-0"
                   >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleOpenTo(rid)}
-                      className="h-3.5 w-3.5 rounded border-zinc-300 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
-                    />
-                    <span className="text-sm text-zinc-900 dark:text-zinc-100 truncate">
-                      {room.name ?? rid}
-                    </span>
-                    {/* Show the room's floor_area tag if it matches the draft,
-                        so the user can see which other rooms are in the same group */}
-                    {room.floor_area && room.floor_area === draftFloorArea && (
-                      <span className="ml-auto text-xs text-zinc-400 font-mono shrink-0">
+                    <label className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleOpenTo(rid)}
+                        className="h-3.5 w-3.5 rounded border-zinc-300 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 shrink-0"
+                      />
+                      <span className="text-sm text-zinc-900 dark:text-zinc-100 truncate">
+                        {room.name ?? rid}
+                      </span>
+                    </label>
+                    {/* Show same-group badge */}
+                    {room.floor_area && room.floor_area === draftFloorArea && !checked && (
+                      <span className="text-xs text-zinc-400 font-mono shrink-0">
                         same group
                       </span>
                     )}
-                  </label>
+                    {/* Door placement button — only for connected rooms */}
+                    {checked && (
+                      <button
+                        type="button"
+                        title={hasDoor ? "Reposition door on map" : "Mark door position on map"}
+                        onClick={() => isPlacing ? stopDoorPlacing() : startDoorPlacing(rid)}
+                        className={`h-6 w-6 inline-flex items-center justify-center rounded-md shrink-0 transition-colors ${
+                          isPlacing
+                            ? "bg-sky-100 dark:bg-sky-900/50 text-sky-600 dark:text-sky-400"
+                            : hasDoor
+                            ? "text-sky-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                            : "text-zinc-300 dark:text-zinc-600 hover:text-zinc-500 dark:hover:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                        }`}
+                        aria-pressed={isPlacing}
+                      >
+                        <Crosshair className="h-3 w-3" />
+                      </button>
+                    )}
+                    {/* Clear door button — only when a door is set and not placing */}
+                    {checked && hasDoor && !isPlacing && (
+                      <button
+                        type="button"
+                        title="Clear door position"
+                        onClick={() => setDoor(rid, null)}
+                        className="h-6 w-6 inline-flex items-center justify-center rounded-md shrink-0 text-zinc-300 dark:text-zinc-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
                 );
               })
             )}

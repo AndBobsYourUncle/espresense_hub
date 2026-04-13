@@ -228,6 +228,31 @@ export const HistorySchema = z
 const Point2DSchema = z.tuple([z.number(), z.number()]);
 const Point3DSchema = z.tuple([z.number(), z.number(), z.number()]);
 
+/**
+ * A single entry in a room's `open_to` list. Either a plain id/name string
+ * (back-compat) or an object that also carries an optional doorway position.
+ */
+export const OpenToEntrySchema = z.union([
+  z.string(),
+  z.object({
+    id: z.string(),
+    /** Doorway centre in config-space metres, for the Bayesian room tracker. */
+    door: z.tuple([z.number(), z.number()]).optional(),
+  }),
+]);
+
+export type OpenToEntry = z.infer<typeof OpenToEntrySchema>;
+
+/** Extract the room id/name from an open_to entry (string or object). */
+export function openToId(entry: OpenToEntry): string {
+  return typeof entry === "string" ? entry : entry.id;
+}
+
+/** Extract the door position from an open_to entry, or undefined. */
+export function openToDoor(entry: OpenToEntry): [number, number] | undefined {
+  return typeof entry === "string" ? undefined : entry.door;
+}
+
 export const RoomSchema = z
   .object({
     id: z.string().optional(),
@@ -239,8 +264,11 @@ export const RoomSchema = z
      * or door between them. Used by the room-aware locator to treat
      * connected spaces as one zone for trust weighting. Symmetric:
      * if A lists B, B is treated as open to A even if it doesn't list A.
+     *
+     * Entries may be plain strings (back-compat) or objects carrying an
+     * optional `door` [x, y] coordinate for the Bayesian room tracker.
      */
-    open_to: z.array(z.string()).default([]),
+    open_to: z.array(OpenToEntrySchema).default([]),
     /**
      * Tag for an open-floor-plan zone. Every room sharing the same
      * `floor_area` value is treated as mutually adjacent in the room
