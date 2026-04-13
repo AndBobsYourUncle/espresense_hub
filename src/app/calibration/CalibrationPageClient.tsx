@@ -292,14 +292,14 @@ export default function CalibrationPageClient() {
                 <thead className="bg-zinc-50 dark:bg-zinc-900/50 text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                   <tr>
                     <Th>Node</Th>
-                    <Th className="hidden @3xl:table-cell">Settings</Th>
+                    <Th className="hidden @4xl:table-cell">Settings</Th>
                     <Th className="text-right whitespace-nowrap">
                       GT bias
                       <div className="text-xs normal-case font-normal tracking-normal text-zinc-400 whitespace-nowrap">
                         node→node
                       </div>
                     </Th>
-                    <Th className="text-right whitespace-nowrap hidden @4xl:table-cell">
+                    <Th className="text-right whitespace-nowrap hidden @5xl:table-cell">
                       samples
                     </Th>
                     <Th className="text-right whitespace-nowrap">
@@ -308,10 +308,10 @@ export default function CalibrationPageClient() {
                         leave-one-out
                       </div>
                     </Th>
-                    <Th className="text-right whitespace-nowrap hidden @5xl:table-cell">
+                    <Th className="text-right whitespace-nowrap hidden @6xl:table-cell">
                       samples
                     </Th>
-                    <Th className="text-right hidden @2xl:table-cell">Updated</Th>
+                    <Th className="text-right hidden @3xl:table-cell">Updated</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -359,7 +359,7 @@ export default function CalibrationPageClient() {
                             <RateLimitBadge nodeId={n.nodeId} audit={audit} />
                           </div>
                         </Td>
-                        <Td className="hidden @3xl:table-cell">
+                        <Td className="hidden @4xl:table-cell">
                           {/* flex-nowrap (not flex-wrap) so the three
                               pills always stay on one line, even when
                               other cells push the column narrow. The
@@ -388,7 +388,7 @@ export default function CalibrationPageClient() {
                             units={units}
                           />
                         </Td>
-                        <Td className="text-right hidden @4xl:table-cell">
+                        <Td className="text-right hidden @5xl:table-cell">
                           <SampleCountCell count={n.gtCount} />
                         </Td>
                         <Td className="text-right">
@@ -399,10 +399,10 @@ export default function CalibrationPageClient() {
                             units={units}
                           />
                         </Td>
-                        <Td className="text-right hidden @5xl:table-cell">
+                        <Td className="text-right hidden @6xl:table-cell">
                           <SampleCountCell count={n.count} />
                         </Td>
-                        <Td className="text-right text-xs text-zinc-500 dark:text-zinc-400 hidden @2xl:table-cell">
+                        <Td className="text-right text-xs text-zinc-500 dark:text-zinc-400 hidden @3xl:table-cell">
                           {formatRelative(n.lastUpdated)}
                         </Td>
                       </tr>

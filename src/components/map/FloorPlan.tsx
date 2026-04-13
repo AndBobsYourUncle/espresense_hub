@@ -1,3 +1,6 @@
+"use client";
+
+import { useMemo } from "react";
 import type { Config, Floor } from "@/lib/config";
 import {
   computeFloorBounds,
@@ -14,6 +17,8 @@ import NodeDebugOverlay from "./NodeDebugOverlay";
 import NodeMarkers, { type NodeMarkerData } from "./NodeMarkers";
 import PinOverlay from "./PinOverlay";
 import WallSelectionOverlay from "./WallSelectionOverlay";
+import { useMapViewport } from "./useMapViewport";
+import ViewportControls from "./ViewportControls";
 
 // Soft Tailwind-200 style palette. Cycled by room index so colors stay stable
 // across renders. Upstream uses an adjacency-aware algorithm; if two adjacent
@@ -52,7 +57,16 @@ export default function FloorPlan({ config, floor }: Props) {
   const ty = (y: number): number => tyFn(transform, y);
 
   const pad = Math.max(width, height) * 0.04;
-  const viewBox = `${-pad} ${-pad} ${width + 2 * pad} ${height + 2 * pad}`;
+  const baseViewBox = useMemo(
+    () => ({
+      x: -pad,
+      y: -pad,
+      w: width + 2 * pad,
+      h: height + 2 * pad,
+    }),
+    [pad, width, height],
+  );
+  const viewport = useMapViewport({ baseViewBox });
 
   // Filter to nodes on this floor and narrow to NodeMarkerData (point required).
   const floorNodes: NodeMarkerData[] = nodesForFloor(
@@ -65,11 +79,26 @@ export default function FloorPlan({ config, floor }: Props) {
   const wallStroke = Math.max(config.map.wall_thickness, 0.04);
 
   return (
+    <>
     <svg
-      viewBox={viewBox}
+      ref={viewport.svgRef}
+      viewBox={viewport.viewBox}
       xmlns="http://www.w3.org/2000/svg"
-      className="w-full h-full"
+      className="w-full h-full touch-none select-none"
       preserveAspectRatio="xMidYMid meet"
+      onPointerDown={viewport.handlePointerDown}
+      onPointerMove={viewport.handlePointerMove}
+      onPointerUp={viewport.handlePointerUp}
+      onPointerCancel={viewport.handlePointerUp}
+      onClick={(e) => {
+        // Suppress the click that immediately follows a pan/zoom — the
+        // gesture would otherwise also trigger the parent MapStage's
+        // background-deselect handler. Reset the flag for next time.
+        if (viewport.didPanRef.current) {
+          e.stopPropagation();
+          viewport.didPanRef.current = false;
+        }
+      }}
     >
       {/* Rooms */}
       <g>
@@ -153,5 +182,7 @@ export default function FloorPlan({ config, floor }: Props) {
           that don't pass through the selected node. */}
       <NodeDebugOverlay transform={transform} nodes={floorNodes} />
     </svg>
+    <ViewportControls isZoomed={viewport.isZoomed} onReset={viewport.reset} />
+    </>
   );
 }

@@ -109,19 +109,21 @@ export default async function NodesPage() {
             No nodes configured or discovered yet
           </div>
         ) : (
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+          <div className="@container rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-zinc-50 dark:bg-zinc-900/50 text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                 <tr>
                   <Th>Name</Th>
                   <Th>Status</Th>
-                  <Th>IP</Th>
-                  <Th>Firmware</Th>
-                  <Th className="text-right">Uptime</Th>
-                  <Th className="text-right">Free heap</Th>
-                  <Th className="text-right">Seen</Th>
-                  <Th className="text-right">Position</Th>
-                  <Th className="text-right">Last telemetry</Th>
+                  <Th className="hidden @md:table-cell">IP</Th>
+                  <Th className="hidden @xl:table-cell">Firmware</Th>
+                  <Th className="text-right hidden @3xl:table-cell">Uptime</Th>
+                  <Th className="text-right hidden @4xl:table-cell">Free heap</Th>
+                  <Th className="text-right hidden @2xl:table-cell">Seen</Th>
+                  <Th className="text-right hidden @5xl:table-cell">Position</Th>
+                  <Th className="text-right hidden @lg:table-cell">
+                    Last telemetry
+                  </Th>
                 </tr>
               </thead>
               <tbody>
@@ -164,25 +166,27 @@ export default async function NodesPage() {
                           </span>
                         </span>
                       </Td>
-                      <Td className="font-mono text-xs">{t?.ip ?? "—"}</Td>
-                      <Td className="font-mono text-xs">
+                      <Td className="font-mono text-xs hidden @md:table-cell">
+                        {t?.ip ?? "—"}
+                      </Td>
+                      <Td className="font-mono text-xs hidden @xl:table-cell">
                         {t?.version ?? t?.firmware ?? "—"}
                       </Td>
-                      <Td className="text-right font-mono text-xs">
+                      <Td className="text-right font-mono text-xs hidden @3xl:table-cell">
                         {formatUptime(t?.uptime)}
                       </Td>
-                      <Td className="text-right font-mono text-xs">
+                      <Td className="text-right font-mono text-xs hidden @4xl:table-cell">
                         {formatBytes(t?.freeHeap)}
                       </Td>
-                      <Td className="text-right font-mono text-xs">
+                      <Td className="text-right font-mono text-xs hidden @2xl:table-cell">
                         {t?.seen ?? "—"}
                       </Td>
-                      <Td className="text-right font-mono text-xs text-zinc-500 dark:text-zinc-400">
+                      <Td className="text-right font-mono text-xs text-zinc-500 dark:text-zinc-400 hidden @5xl:table-cell">
                         {row.point
                           ? `${row.point[0]}, ${row.point[1]}, ${row.point[2]}`
                           : "—"}
                       </Td>
-                      <Td className="text-right text-xs text-zinc-500 dark:text-zinc-400">
+                      <Td className="text-right text-xs text-zinc-500 dark:text-zinc-400 hidden @lg:table-cell">
                         {formatRelative(row.state?.telemetryAt)}
                       </Td>
                     </tr>
