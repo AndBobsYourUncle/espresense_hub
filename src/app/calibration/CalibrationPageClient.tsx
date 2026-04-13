@@ -299,12 +299,14 @@ export default function CalibrationPageClient() {
                         node→node
                       </div>
                     </Th>
+                    <Th className="text-right whitespace-nowrap">samples</Th>
                     <Th className="text-right whitespace-nowrap">
                       LOO bias
                       <div className="text-xs normal-case font-normal tracking-normal text-zinc-400 whitespace-nowrap">
                         leave-one-out
                       </div>
                     </Th>
+                    <Th className="text-right whitespace-nowrap">samples</Th>
                     <Th className="text-right">Updated</Th>
                   </tr>
                 </thead>
@@ -383,6 +385,9 @@ export default function CalibrationPageClient() {
                           />
                         </Td>
                         <Td className="text-right">
+                          <SampleCountCell count={n.gtCount} />
+                        </Td>
+                        <Td className="text-right">
                           <BiasCell
                             mean={n.meanResidualMeters}
                             stddev={n.stddevMeters}
@@ -390,13 +395,16 @@ export default function CalibrationPageClient() {
                             units={units}
                           />
                         </Td>
+                        <Td className="text-right">
+                          <SampleCountCell count={n.count} />
+                        </Td>
                         <Td className="text-right text-xs text-zinc-500 dark:text-zinc-400">
                           {formatRelative(n.lastUpdated)}
                         </Td>
                       </tr>
                       {isExpanded && hasPairs && (
                         <tr className="border-t border-zinc-100 dark:border-zinc-800/60 bg-zinc-50/40 dark:bg-zinc-900/20">
-                          <td colSpan={5} className="px-4 py-3">
+                          <td colSpan={7} className="px-4 py-3">
                             <PairBreakdown
                               listenerAbsorption={parseFloat(
                                 n.settings["absorption"] ?? "2.7",
@@ -1222,15 +1230,28 @@ function BiasCell({
           ? `${mean >= 0 ? "+" : ""}${formatDistanceDisplay(mean, units)}`
           : "—"}
       </div>
-      <div
-        className="text-xs text-zinc-400"
-        title={hasData ? `${count.toLocaleString()} samples` : undefined}
-      >
-        {hasData
-          ? `±${formatDistanceDisplay(stddev, units)}`
-          : "\u00a0"}
+      <div className="text-xs text-zinc-400">
+        {hasData ? `±${formatDistanceDisplay(stddev, units)}` : "\u00a0"}
       </div>
     </div>
+  );
+}
+
+/**
+ * Right-aligned, monospace single-number cell for sample counts. Lives
+ * in its own column next to the corresponding BiasCell. Renders an em-
+ * dash when count is zero so empty rows don't visually shift.
+ */
+function SampleCountCell({ count }: { count: number }) {
+  if (count <= 0) {
+    return (
+      <span className="font-mono text-xs text-zinc-300 tabular-nums">—</span>
+    );
+  }
+  return (
+    <span className="font-mono text-xs text-zinc-500 dark:text-zinc-400 tabular-nums whitespace-nowrap">
+      {count.toLocaleString()}
+    </span>
   );
 }
 
