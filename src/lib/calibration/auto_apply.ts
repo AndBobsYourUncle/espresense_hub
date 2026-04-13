@@ -39,30 +39,48 @@ const N_MAX = 7.0;
 export const PER_NODE_RATE_LIMIT_MS = 10 * 60_000;
 
 /**
- * Module-private mutable state, accessed only via the getters below.
- *
- * Why getters and not `export let`: bundlers (Webpack / Turbopack)
- * compile ESM imports to CommonJS-style snapshots in many configs,
- * so consumers of `import { AUTO_APPLY_INTERVAL_MS }` would see the
- * value at *module load time*, not the live value after
- * `setAutoApplyConfig`. Getter functions sidestep the issue —
- * every call resolves the current value, regardless of how the
- * bundler treats the import.
+ * Mutable runtime state. Lives on `globalThis` as a per-process
+ * singleton so bootstrap (instrumentation.ts) and API routes share
+ * the same state — Next.js can otherwise load the same module file
+ * into separate contexts and each gets its own copy of any module-
+ * scoped `let`, which would silently break `setAutoApplyConfig`'s
+ * effect from the API surface's perspective. Same trick the store
+ * uses (`__espresenseStore`).
  */
-let intervalMs = 5 * 60_000;
-let autoApplyEnabled = true;
+interface AutoApplyState {
+  intervalMs: number;
+  enabled: boolean;
+  /** Per-node rate-limit timestamps (epoch ms of most recent push). */
+  lastByNode: Map<string, number>;
+  /** Recent push events, newest first. Bounded to AUDIT_LOG_MAX. */
+  auditLog: AutoApplyEvent[];
+}
+const globalForAutoApply = globalThis as unknown as {
+  __espresenseAutoApplyState?: AutoApplyState;
+};
+function state(): AutoApplyState {
+  if (!globalForAutoApply.__espresenseAutoApplyState) {
+    globalForAutoApply.__espresenseAutoApplyState = {
+      intervalMs: 5 * 60_000,
+      enabled: true,
+      lastByNode: new Map(),
+      auditLog: [],
+    };
+  }
+  return globalForAutoApply.__espresenseAutoApplyState;
+}
 
 /** First-cycle delay after boot. Constant — no need to make tunable. */
 export const AUTO_APPLY_INITIAL_DELAY_MS = 60_000;
 
 /** Current cycle interval in milliseconds. */
 export function getAutoApplyIntervalMs(): number {
-  return intervalMs;
+  return state().intervalMs;
 }
 
 /** Whether the auto-apply background loop runs at all. */
 export function isAutoApplyEnabled(): boolean {
-  return autoApplyEnabled;
+  return state().enabled;
 }
 
 /** Configure auto-apply from the `optimization` config block. */
@@ -70,14 +88,12 @@ export function setAutoApplyConfig(opts: {
   enabled: boolean;
   intervalSecs: number;
 }): void {
-  autoApplyEnabled = opts.enabled;
+  const s = state();
+  s.enabled = opts.enabled;
   if (opts.intervalSecs > 0 && Number.isFinite(opts.intervalSecs)) {
-    intervalMs = opts.intervalSecs * 1000;
+    s.intervalMs = opts.intervalSecs * 1000;
   }
 }
-
-/** Track when each node was last auto-applied so we can rate-limit. */
-const lastAutoApplyByNode = new Map<string, number>();
 
 export interface AutoApplyEvent {
   nodeId: string;
@@ -89,12 +105,10 @@ export interface AutoApplyEvent {
   timestamp: number;
 }
 
-/** Recent auto-apply audit log (newest first). Bounded to 200 entries. */
-const auditLog: AutoApplyEvent[] = [];
 const AUDIT_LOG_MAX = 200;
 
 export function getAutoApplyAuditLog(): readonly AutoApplyEvent[] {
-  return auditLog;
+  return state().auditLog;
 }
 
 /**
@@ -109,24 +123,26 @@ export interface AutoApplyStateSnapshot {
 }
 
 export function getAutoApplyState(): AutoApplyStateSnapshot {
+  const s = state();
   return {
-    auditLog: [...auditLog],
-    lastAutoApplyByNode: Object.fromEntries(lastAutoApplyByNode),
+    auditLog: [...s.auditLog],
+    lastAutoApplyByNode: Object.fromEntries(s.lastByNode),
   };
 }
 
 export function restoreAutoApplyState(snap: AutoApplyStateSnapshot): void {
-  auditLog.length = 0;
+  const s = state();
+  s.auditLog.length = 0;
   if (Array.isArray(snap.auditLog)) {
     for (const e of snap.auditLog.slice(0, AUDIT_LOG_MAX)) {
-      auditLog.push(e);
+      s.auditLog.push(e);
     }
   }
-  lastAutoApplyByNode.clear();
+  s.lastByNode.clear();
   if (snap.lastAutoApplyByNode) {
     for (const [k, v] of Object.entries(snap.lastAutoApplyByNode)) {
       if (typeof v === "number" && Number.isFinite(v)) {
-        lastAutoApplyByNode.set(k, v);
+        s.lastByNode.set(k, v);
       }
     }
   }
@@ -139,7 +155,7 @@ export function restoreAutoApplyState(snap: AutoApplyStateSnapshot): void {
  * Returns the events that were applied (for logging / testing).
  */
 export async function runAutoApplyCycle(): Promise<AutoApplyEvent[]> {
-  if (!autoApplyEnabled) return [];
+  if (!state().enabled) return [];
   const store = getStore();
   const fits = fitAllNodes(store);
   const now = Date.now();
@@ -177,7 +193,8 @@ export async function runAutoApplyCycle(): Promise<AutoApplyEvent[]> {
     }
 
     // Per-node rate limit.
-    const lastApplied = lastAutoApplyByNode.get(fit.nodeId) ?? 0;
+    const s = state();
+    const lastApplied = s.lastByNode.get(fit.nodeId) ?? 0;
     if (now - lastApplied < PER_NODE_RATE_LIMIT_MS) continue;
 
     try {
@@ -186,7 +203,7 @@ export async function runAutoApplyCycle(): Promise<AutoApplyEvent[]> {
         "absorption",
         pushValue.toFixed(2),
       );
-      lastAutoApplyByNode.set(fit.nodeId, now);
+      s.lastByNode.set(fit.nodeId, now);
 
       const event: AutoApplyEvent = {
         nodeId: fit.nodeId,
@@ -198,8 +215,8 @@ export async function runAutoApplyCycle(): Promise<AutoApplyEvent[]> {
         timestamp: now,
       };
       applied.push(event);
-      auditLog.unshift(event);
-      if (auditLog.length > AUDIT_LOG_MAX) auditLog.pop();
+      s.auditLog.unshift(event);
+      if (s.auditLog.length > AUDIT_LOG_MAX) s.auditLog.pop();
 
       console.log(
         `[auto-cal] ${fit.nodeId}: ${currentParsed.toFixed(2)} → ${pushValue.toFixed(2)} ` +
