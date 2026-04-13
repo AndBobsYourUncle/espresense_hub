@@ -354,7 +354,12 @@ export default function CalibrationPageClient() {
                           </div>
                         </Td>
                         <Td>
-                          <div className="flex items-center gap-1.5 flex-wrap">
+                          {/* flex-nowrap (not flex-wrap) so the three
+                              pills always stay on one line, even when
+                              other cells push the column narrow. The
+                              row height should never flip from 1 to 2
+                              lines because of column-width drift. */}
+                          <div className="flex items-center gap-1.5 flex-nowrap whitespace-nowrap">
                             <SettingPill
                               label="abs"
                               value={n.settings["absorption"]}
@@ -1211,7 +1216,7 @@ function BiasCell({
   // wiggle as values change either.
   const hasData = count > 0;
   return (
-    <div className="font-mono text-xs leading-tight tabular-nums">
+    <div className="font-mono text-xs leading-tight tabular-nums whitespace-nowrap">
       <div className={hasData ? "text-zinc-900 dark:text-zinc-100" : "text-zinc-300"}>
         {hasData
           ? `${mean >= 0 ? "+" : ""}${formatDistanceDisplay(mean, units)}`
