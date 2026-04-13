@@ -508,13 +508,13 @@ export default function RoomOverlay({ floor, transform }: Props) {
                 const hingeY = sy - sty * halfW;
                 const freeEndX = sx + stx * halfW;
                 const freeEndY = sy + sty * halfW;
-                // Open tip: hinge offset inward (opposite outward normal) by DOOR_WIDTH
-                const openTipX = hingeX - snx * DOOR_WIDTH;
-                const openTipY = hingeY - sny * DOOR_WIDTH;
+                // Open tip: hinge offset outward (into connected room) by DOOR_WIDTH
+                const openTipX = hingeX + snx * DOOR_WIDTH;
+                const openTipY = hingeY + sny * DOOR_WIDTH;
 
                 // Sweep: cross product of (freeEnd−hinge) × (openTip−hinge) in SVG space.
                 // Positive → clockwise in screen coords → sweep=1.
-                const sweep = (sty * snx - stx * sny) >= 0 ? 1 : 0;
+                const sweep = (sty * snx - stx * sny) >= 0 ? 0 : 1;
 
                 const f = (v: number) => v.toFixed(4);
                 return (
