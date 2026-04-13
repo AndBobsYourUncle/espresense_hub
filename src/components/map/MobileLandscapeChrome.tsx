@@ -38,7 +38,7 @@ export default function MobileLandscapeChrome({
           <div className="font-semibold text-zinc-900 dark:text-zinc-100">
             Map
           </div>
-          <div className="whitespace-nowrap text-[10px]">{summary}</div>
+          <div className="text-[10px] break-words">{summary}</div>
         </div>
       </div>
       <MapToolbar orientation="vertical" />

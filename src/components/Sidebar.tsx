@@ -131,11 +131,11 @@ export default function Sidebar() {
           }
         }}
       >
-      <div className="h-16 flex items-center gap-2 px-5 border-b border-zinc-200 dark:border-zinc-800">
+      <div className="h-16 shrink-0 flex items-center gap-2 px-5 border-b border-zinc-200 dark:border-zinc-800">
         <Radio className="h-5 w-5 text-blue-500" />
         <span className="font-semibold tracking-tight">ESPresense Hub</span>
       </div>
-      <nav className="flex-1 p-3 space-y-1">
+      <nav className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1">
         {navItems.map(({ href, label, icon: Icon }) => {
           const active =
             href === "/" ? pathname === "/" : pathname.startsWith(href);
@@ -155,7 +155,7 @@ export default function Sidebar() {
           );
         })}
       </nav>
-      <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 space-y-2">
+      <div className="shrink-0 p-3 border-t border-zinc-200 dark:border-zinc-800 space-y-2">
         <div
           className="px-3 py-1 text-xs space-y-1"
           title={status?.mqtt.error ?? undefined}
