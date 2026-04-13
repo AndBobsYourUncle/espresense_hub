@@ -167,10 +167,11 @@ async function ensureDiscovery(
   if (s.sentDiscovery.has(key)) return;
   s.sentDiscovery.add(key);
 
-  const entityLabel = zoneLabel ?? zoneId;
-  const name = entityLabel
-    ? `${deviceName} (${entityLabel})`
-    : deviceName;
+  // HA forms the entity_id as "{device_name}_{entity_name}" when a device
+  // block is present, so the entity name should describe the tracker type,
+  // not repeat the device name. Default tracker = "Location";
+  // zone trackers = the zone label (e.g. "Master Suite").
+  const name = zoneLabel ?? (zoneId ? zoneId : "Location");
 
   const uniqueId = zoneId
     ? `espresense-hub-${deviceId}-${zoneId}`
