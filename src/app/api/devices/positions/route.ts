@@ -23,6 +23,14 @@ export interface DevicePositionDTO {
   computedAt: number;
   /** Per-locator alternative positions for side-by-side comparison. */
   alternatives?: AlternativePositionDTO[];
+  /**
+   * Raw locator output that's currently being overridden by a pin
+   * lock. Only present when `algorithm === "pin_anchored"`. Lets the
+   * map render a "convergence target" ghost marker so the user can
+   * watch the underlying estimate migrate toward the pin as biases
+   * accumulate.
+   */
+  rawPosition?: { x: number; y: number; z: number };
 }
 
 export interface DevicePositionsResponse {
@@ -47,6 +55,7 @@ export function GET() {
       lastSeen: d.lastSeen,
       computedAt: d.position.computedAt,
       alternatives: d.position.alternatives,
+      rawPosition: d.position.rawPosition,
     });
   }
   const body: DevicePositionsResponse = {

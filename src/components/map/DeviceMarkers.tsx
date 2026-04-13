@@ -139,6 +139,62 @@ export default function DeviceMarkers({
           );
         })}
 
+      {/* Pin-convergence marker: when a pin is locking the displayed
+          position, also render the raw locator's interpretation as a
+          small ghost dot with a dashed line back to the pin. Watching
+          the dashed line shrink over time confirms bias-learning is
+          converging. Always visible (not gated by compareMode) because
+          this is direct user feedback on an action they just took. */}
+      {visible.map((d) => {
+        if (!d.rawPosition) return null;
+        const sx = tx(transform, d.x);
+        const sy = ty(transform, d.y);
+        const rx = tx(transform, d.rawPosition.x);
+        const ry = ty(transform, d.rawPosition.y);
+        const dxm = d.rawPosition.x - d.x;
+        const dym = d.rawPosition.y - d.y;
+        const distM = Math.sqrt(dxm * dxm + dym * dym);
+        return (
+          <g
+            key={`raw-${d.id}`}
+            className="fp-device-raw pointer-events-none"
+          >
+            <line
+              x1={sx}
+              y1={sy}
+              x2={rx}
+              y2={ry}
+              stroke="#a78bfa"
+              strokeWidth={0.04}
+              strokeOpacity={0.7}
+              strokeDasharray="0.1 0.08"
+            />
+            <circle
+              cx={rx}
+              cy={ry}
+              r={0.13}
+              fill="none"
+              stroke="#a78bfa"
+              strokeWidth={0.05}
+              strokeOpacity={0.95}
+            />
+            <text
+              x={rx}
+              y={ry - 0.25}
+              textAnchor="middle"
+              fontSize={0.18}
+              fontWeight={500}
+              fill="#7c3aed"
+              stroke="#ffffff"
+              strokeWidth={0.04}
+              paintOrder="stroke"
+            >
+              raw · {distM.toFixed(1)}m off
+            </text>
+          </g>
+        );
+      })}
+
       {visible.map((d) => {
         const sx = tx(transform, d.x);
         const sy = ty(transform, d.y);

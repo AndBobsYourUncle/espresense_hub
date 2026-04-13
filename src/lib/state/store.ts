@@ -71,6 +71,14 @@ export interface DevicePosition {
   algorithm: string;
   computedAt: number;
   /**
+   * Raw locator output as it would be *without* a pin lock — only set
+   * when a pin is currently active and overriding the displayed
+   * position. Lets the UI render a "convergence target" ghost marker
+   * so the user can watch the underlying estimate migrate toward the
+   * pin as bias data accumulates. Cleared when no pin is active.
+   */
+  rawPosition?: { x: number; y: number; z: number };
+  /**
    * Positions computed by alternative (non-active) locators for side-by-side
    * comparison. Each entry is the raw, unwrapped result of one base locator
    * (IDW, NM, BFGS, MLE). Surfaced as ghost markers when compare mode is on.
@@ -401,6 +409,11 @@ export class Store {
         z: pz,
         confidence: 1,
         algorithm: "pin_anchored",
+        // Preserve the raw locator output so the UI can show a
+        // "convergence target" marker. Watching this migrate toward
+        // the pin is direct visual confirmation that bias-learning
+        // is doing its job.
+        rawPosition: { x: position.x, y: position.y, z: position.z },
       };
       return;
     }
