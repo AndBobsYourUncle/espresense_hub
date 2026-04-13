@@ -101,7 +101,7 @@ export default function NodeMarkers({ nodes, transform }: Props) {
               strokeWidth={NODE_STROKE}
               className="fp-node"
             >
-              <title>{`${label} — shift+click to edit`}</title>
+              <title>{label}</title>
             </circle>
             {label && (
               <text

@@ -3,6 +3,7 @@
 import { Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useUnits } from "@/components/UnitsProvider";
+import { useIsTouch } from "@/lib/hooks/usePointerType";
 import { formatDistanceDisplay } from "@/lib/units";
 import { usePinHighlight } from "./PinHighlightProvider";
 
@@ -30,6 +31,7 @@ interface Props {
 export default function DevicePinsPanel({ deviceId }: Props) {
   const { units } = useUnits();
   const { setHoveredTimestamp } = usePinHighlight();
+  const isTouch = useIsTouch();
   const [pins, setPins] = useState<PinDTO[]>([]);
   const [refRssi, setRefRssi] = useState<number | null>(null);
   const [applying, setApplying] = useState(false);
@@ -120,16 +122,12 @@ export default function DevicePinsPanel({ deviceId }: Props) {
 
   if (!deviceId || pins.length === 0) {
     return (
-      <section className="px-4 py-3 border-t border-zinc-200 dark:border-zinc-800">
-        <div className="text-xs uppercase tracking-wide text-zinc-400 mb-1">
-          Pins
-        </div>
-        <div className="text-xs text-zinc-500 dark:text-zinc-400">
-          No pins placed. Switch to the Pin tool and{" "}
-          <strong>shift+click</strong> on the map where the device actually is
-          to start building a learned RF map.
-        </div>
-      </section>
+      <div className="px-4 pb-3 text-xs text-zinc-500 dark:text-zinc-400">
+        No pins placed. Switch to the Pin tool and{" "}
+        <strong>{isTouch ? "long-press" : "shift+click"}</strong> on the
+        map where the device actually is to start building a learned RF
+        map.
+      </div>
     );
   }
 
@@ -140,11 +138,8 @@ export default function DevicePinsPanel({ deviceId }: Props) {
   });
 
   return (
-    <section className="px-4 py-3 border-t border-zinc-200 dark:border-zinc-800">
+    <div className="px-4 pb-3">
       <div className="flex items-baseline justify-between mb-2">
-        <div className="text-xs uppercase tracking-wide text-zinc-400">
-          Pins ({pins.length})
-        </div>
         {refRssi != null && (
           <button
             type="button"
@@ -278,10 +273,11 @@ export default function DevicePinsPanel({ deviceId }: Props) {
       </div>
 
       <div className="mt-2 text-xs text-zinc-400 leading-relaxed">
-        Hover a row to highlight on the map. Click to toggle accumulation. On
-        the map: <strong>shift+click</strong> empty space to add a pin,{" "}
-        <strong>drag</strong> a pin to reposition.
+        {isTouch ? "Tap" : "Hover"} a row to highlight on the map.{" "}
+        {isTouch ? "Tap" : "Click"} to toggle accumulation. On the map:{" "}
+        <strong>{isTouch ? "long-press" : "shift+click"}</strong> empty
+        space to add a pin, <strong>drag</strong> a pin to reposition.
       </div>
-    </section>
+    </div>
   );
 }

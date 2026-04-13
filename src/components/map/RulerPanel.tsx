@@ -358,7 +358,7 @@ export default function RulerPanel({ nodes }: Props) {
     <div
       onClick={(e) => e.stopPropagation()}
       style={{ transform: `translate(${pos.x}px, ${pos.y}px)` }}
-      className="absolute z-10 inset-x-2 top-2 bottom-2 sm:inset-auto sm:top-16 sm:left-4 sm:bottom-auto sm:w-[320px] sm:max-w-[90vw] sm:max-h-[calc(100%-5rem)] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg flex flex-col"
+      className="absolute z-10 inset-x-2 top-2 max-h-[calc(100%-1rem)] sm:inset-auto sm:top-16 sm:left-4 sm:w-[320px] sm:max-w-[90vw] sm:max-h-[calc(100%-5rem)] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg flex flex-col"
     >
       <header
         {...handlers}

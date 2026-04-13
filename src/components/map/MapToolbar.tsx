@@ -2,13 +2,15 @@
 
 import type { LucideIcon } from "lucide-react";
 import { GitCompareArrows, MapPin, MousePointer2, Ruler } from "lucide-react";
+import { useIsTouch } from "@/lib/hooks/usePointerType";
 import { useMapTool, type MapTool } from "./MapToolProvider";
 
 interface ToolDef {
   tool: MapTool;
   label: string;
   icon: LucideIcon;
-  hint: string;
+  /** Hint can branch on input modality (touch vs mouse). */
+  hint: (touch: boolean) => string;
 }
 
 const TOOLS: ToolDef[] = [
@@ -16,19 +18,28 @@ const TOOLS: ToolDef[] = [
     tool: "inspect",
     label: "Inspect",
     icon: MousePointer2,
-    hint: "Click any node or device for details",
+    hint: (touch) =>
+      touch
+        ? "Tap any node or device for details"
+        : "Click any node or device for details",
   },
   {
     tool: "ruler",
     label: "Ruler",
     icon: Ruler,
-    hint: "Click two nodes or a wall to measure",
+    hint: (touch) =>
+      touch
+        ? "Tap two nodes or a wall to measure"
+        : "Click two nodes or a wall to measure",
   },
   {
     tool: "pin",
     label: "Pin",
     icon: MapPin,
-    hint: "Select a device, then SHIFT+click where you actually are to calibrate. Click pins to toggle accumulation, drag to move.",
+    hint: (touch) =>
+      touch
+        ? "Select a device, then long-press where you actually are to drop a pin. Tap pins to toggle accumulation, drag to move."
+        : "Select a device, then SHIFT+click where you actually are to drop a pin. Click pins to toggle accumulation, drag to move.",
   },
 ];
 
@@ -56,6 +67,7 @@ export default function MapToolbar({
   const { activeTool, setActiveTool, compareMode, setCompareMode } =
     useMapTool();
   const isVertical = orientation === "vertical";
+  const isTouch = useIsTouch();
 
   return (
     <div
@@ -74,7 +86,7 @@ export default function MapToolbar({
             key={tool}
             type="button"
             onClick={() => setActiveTool(tool)}
-            title={hint}
+            title={hint(isTouch)}
             aria-pressed={active}
             className={`inline-flex items-center gap-1.5 h-7 px-2 sm:px-2.5 rounded text-xs font-medium transition-colors ${
               active

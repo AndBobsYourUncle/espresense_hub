@@ -116,26 +116,19 @@ export default function PinOverlay({ transform }: Props) {
     [selectedId, reload],
   );
 
-  const handleBackgroundClick = useCallback(
-    async (e: React.MouseEvent<SVGRectElement>) => {
-      if (!active || !selectedId) return;
-      // Plain click → let it bubble up to MapStage and deselect (matches
-      // the user's muscle memory from inspect/ruler modes).
-      // Shift+click → place a new pin at this position.
-      if (!e.shiftKey) return;
-      e.stopPropagation();
-
-      const svg = (e.target as SVGElement).ownerSVGElement;
-      if (!svg) return;
-      const pt = svg.createSVGPoint();
-      pt.x = e.clientX;
-      pt.y = e.clientY;
-      const ctm = svg.getScreenCTM();
+  /** Place a new pin at a given client (screen) coordinate. Shared by
+   *  the desktop shift+click shortcut and the touch-friendly long-press. */
+  const placePinAt = useCallback(
+    async (clientX: number, clientY: number, svgEl: SVGSVGElement | null) => {
+      if (!selectedId || !svgEl) return;
+      const pt = svgEl.createSVGPoint();
+      pt.x = clientX;
+      pt.y = clientY;
+      const ctm = svgEl.getScreenCTM();
       if (!ctm) return;
       const svgPt = pt.matrixTransform(ctm.inverse());
       const configX = txInv(transform, svgPt.x);
       const configY = tyInv(transform, svgPt.y);
-
       try {
         const res = await fetch(
           `/api/devices/${encodeURIComponent(selectedId)}/pin`,
@@ -151,7 +144,68 @@ export default function PinOverlay({ transform }: Props) {
         // best-effort
       }
     },
-    [active, selectedId, transform, reload],
+    [selectedId, transform, reload],
+  );
+
+  // ----- Long-press handling on the background rect ------------------
+  // Touch users can't shift+click. Holding finger ~500 ms triggers
+  // pin placement at the original press coordinates. Light haptic on
+  // trigger if the platform supports it.
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
+  /** True after a successful long-press, until the resulting click is
+   *  consumed. Prevents both "place pin" AND "deselect device" firing. */
+  const didLongPressRef = useRef(false);
+  const LONG_PRESS_MS = 500;
+  const LONG_PRESS_MOVE_TOLERANCE = 8;
+
+  const cancelLongPress = useCallback(() => {
+    if (longPressTimerRef.current != null) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    longPressStartRef.current = null;
+  }, []);
+
+  const startLongPress = useCallback(
+    (clientX: number, clientY: number, svgEl: SVGSVGElement | null) => {
+      if (!active || !selectedId) return;
+      cancelLongPress();
+      longPressStartRef.current = { x: clientX, y: clientY };
+      longPressTimerRef.current = window.setTimeout(() => {
+        didLongPressRef.current = true;
+        longPressTimerRef.current = null;
+        if (typeof navigator !== "undefined" && navigator.vibrate) {
+          navigator.vibrate(40);
+        }
+        placePinAt(clientX, clientY, svgEl);
+      }, LONG_PRESS_MS);
+    },
+    [active, selectedId, placePinAt, cancelLongPress],
+  );
+
+  const handleBackgroundClick = useCallback(
+    async (e: React.MouseEvent<SVGRectElement>) => {
+      if (!active || !selectedId) return;
+      // If a long-press just triggered, swallow the resulting click —
+      // we already placed the pin, no need to also deselect.
+      if (didLongPressRef.current) {
+        e.stopPropagation();
+        didLongPressRef.current = false;
+        return;
+      }
+      // Plain click → let it bubble up to MapStage and deselect (matches
+      // the user's muscle memory from inspect/ruler modes).
+      // Shift+click → place a new pin at this position (desktop shortcut).
+      if (!e.shiftKey) return;
+      e.stopPropagation();
+      placePinAt(
+        e.clientX,
+        e.clientY,
+        (e.target as SVGElement).ownerSVGElement,
+      );
+    },
+    [active, selectedId, placePinAt],
   );
 
   /** Convert pointer event clientX/Y to map-space coordinates. */
@@ -246,6 +300,25 @@ export default function PinOverlay({ transform }: Props) {
           fill="transparent"
           style={{ cursor: "crosshair" }}
           onClick={handleBackgroundClick}
+          onPointerDown={(e) =>
+            startLongPress(
+              e.clientX,
+              e.clientY,
+              (e.target as SVGElement).ownerSVGElement,
+            )
+          }
+          onPointerMove={(e) => {
+            const start = longPressStartRef.current;
+            if (!start) return;
+            const dx = e.clientX - start.x;
+            const dy = e.clientY - start.y;
+            if (Math.hypot(dx, dy) > LONG_PRESS_MOVE_TOLERANCE) {
+              cancelLongPress();
+            }
+          }}
+          onPointerUp={cancelLongPress}
+          onPointerCancel={cancelLongPress}
+          onPointerLeave={cancelLongPress}
         />
       )}
 

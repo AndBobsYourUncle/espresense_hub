@@ -184,6 +184,7 @@ export default function DeviceDetailPanel() {
   const { units } = useUnits();
   const open = selectedId != null;
   const [measurementsOpen, setMeasurementsOpen] = useState(false);
+  const [pinsOpen, setPinsOpen] = useState(false);
 
   // Drag-to-reposition the panel — useful when it covers something the
   // user wants to interact with on the map.
@@ -347,7 +348,21 @@ export default function DeviceDetailPanel() {
               )}
             </section>
 
-            <DevicePinsPanel deviceId={selectedId} />
+            <section className="border-t border-zinc-200 dark:border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setPinsOpen((o) => !o)}
+                className="w-full px-4 pt-3 pb-2 flex items-center justify-between gap-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-900/40 transition-colors"
+              >
+                <span className="text-xs uppercase tracking-wide text-zinc-400">
+                  Pins
+                </span>
+                <ChevronDown
+                  className={`h-3.5 w-3.5 text-zinc-400 shrink-0 transition-transform ${pinsOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+              {pinsOpen && <DevicePinsPanel deviceId={selectedId} />}
+            </section>
 
             {measurementsOpen && (
               <section className="px-4 py-3 border-t border-zinc-200 dark:border-zinc-800 text-xs text-zinc-400 space-y-1">
