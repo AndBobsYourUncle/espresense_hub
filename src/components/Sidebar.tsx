@@ -238,7 +238,7 @@ export default function Sidebar() {
             )}
           </div>
         </div>
-        <div className="px-3 flex items-center justify-between gap-2">
+        <div className="px-3 flex items-center justify-between gap-2 max-lg:landscape:hidden">
           <span className="text-xs uppercase tracking-wide text-zinc-400">
             units
           </span>
