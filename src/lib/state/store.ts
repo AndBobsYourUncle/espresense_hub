@@ -86,6 +86,24 @@ export interface DevicePosition {
   alternatives?: AlternativePosition[];
 }
 
+/**
+ * Running 2D-distance stats between our active locator's output and a
+ * specific alternative locator (or upstream companion). Updated every
+ * time we have both positions in hand. Lifetime-mean for now — recent
+ * samples dominate naturally as the count grows. No decay yet; resets
+ * only on process restart (since these are diagnostic, not load-bearing).
+ */
+export interface LocatorComparisonStats {
+  /** Number of (active, alt) pairs averaged. */
+  count: number;
+  /** Σ |active - alt| in meters. */
+  sum: number;
+  /** Σ |active - alt|² for stddev computation. */
+  sumSq: number;
+  /** Most recent update, ms epoch. */
+  lastUpdatedMs: number;
+}
+
 export interface UpstreamPosition {
   x: number;
   y: number;
@@ -123,6 +141,13 @@ export interface DeviceState {
    * visual measurement of how much our pipeline improves on upstream.
    */
   upstreamPosition?: UpstreamPosition;
+  /**
+   * Running mean distance from our active position to each comparison
+   * locator's output. Keyed by algorithm name (e.g. `"nadaraya_watson"`,
+   * `"upstream_companion"`). Used by the compare legend to surface a
+   * "they were N meters off from us, on average" number per locator.
+   */
+  locatorComparisons?: Map<string, LocatorComparisonStats>;
 }
 
 export interface MqttConnectionState {
@@ -476,6 +501,9 @@ export class Store {
    * about devices we haven't seen our own measurements from yet (or
    * stale retained ones). We DON'T touch `lastSeen` here — that's
    * driven by our own MQTT measurement traffic, not by upstream.
+   *
+   * Also updates the `upstream_companion` entry in `locatorComparisons`
+   * if we have an active position to compare against right now.
    */
   setDeviceUpstreamPosition(deviceId: string, pos: UpstreamPosition): void {
     let d = this.devices.get(deviceId);
@@ -491,6 +519,49 @@ export class Store {
       this.devices.set(deviceId, d);
     }
     d.upstreamPosition = pos;
+    if (d.position) {
+      const dx = pos.x - d.position.x;
+      const dy = pos.y - d.position.y;
+      this.recordLocatorComparison(
+        d,
+        "upstream_companion",
+        Math.sqrt(dx * dx + dy * dy),
+      );
+    }
+  }
+
+  /**
+   * Append one (active, alt) distance sample to the per-(device, locator)
+   * comparison stats. Caps `count` at 10000 to bound memory and floating-
+   * point drift — once full, scales down old sums proportionally so the
+   * most recent samples have proper weight (effectively a moving average
+   * after that point).
+   */
+  recordLocatorComparison(
+    device: DeviceState,
+    algorithm: string,
+    distance: number,
+  ): void {
+    if (!Number.isFinite(distance) || distance < 0) return;
+    if (!device.locatorComparisons) {
+      device.locatorComparisons = new Map();
+    }
+    let stats = device.locatorComparisons.get(algorithm);
+    if (!stats) {
+      stats = { count: 0, sum: 0, sumSq: 0, lastUpdatedMs: 0 };
+      device.locatorComparisons.set(algorithm, stats);
+    }
+    const MAX = 10_000;
+    if (stats.count >= MAX) {
+      const factor = (MAX - 1) / MAX;
+      stats.count = MAX - 1;
+      stats.sum *= factor;
+      stats.sumSq *= factor;
+    }
+    stats.count += 1;
+    stats.sum += distance;
+    stats.sumSq += distance * distance;
+    stats.lastUpdatedMs = Date.now();
   }
 
   setMqttStatus(next: Partial<MqttConnectionState>): void {

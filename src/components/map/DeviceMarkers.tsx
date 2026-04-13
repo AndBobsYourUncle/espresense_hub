@@ -87,7 +87,7 @@ export default function DeviceMarkers({
 }: Props) {
   const { devices, snapping } = useDevicePositions(pollMs);
   const { selectedId, select } = useDeviceSelection();
-  const { compareMode, setInspectedNodeId } = useMapTool();
+  const { compareMode, setInspectedNodeId, hiddenLocators } = useMapTool();
   const now = Date.now();
 
   const visible = devices.filter((d) => now - d.lastSeen <= staleAfterMs);
@@ -100,6 +100,7 @@ export default function DeviceMarkers({
           to our active marker is the headline visual: the magnitude of
           the offset IS the per-frame benefit our pipeline buys you. */}
       {compareMode &&
+        !hiddenLocators.has("upstream_companion") &&
         visible.map((d) => {
           if (!d.upstreamPosition) return null;
           const sx = tx(transform, d.x);
@@ -149,6 +150,7 @@ export default function DeviceMarkers({
               className="fp-device-ghost pointer-events-none"
             >
               {d.alternatives.map((alt) => {
+                if (hiddenLocators.has(alt.algorithm)) return null;
                 const ax = tx(transform, alt.x);
                 const ay = ty(transform, alt.y);
                 const color = colorForLocator(alt.algorithm);

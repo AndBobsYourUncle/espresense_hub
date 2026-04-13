@@ -346,6 +346,22 @@ export function attachHandlers(client: MqttClient, config: Config): void {
           computedAt: Date.now(),
           alternatives,
         });
+
+        // Update per-locator comparison stats: distance from each
+        // alternative's output to ours (after our active position has
+        // been written). Cheap — a sqrt per alt.
+        const stored = store.devices.get(device.id);
+        if (stored?.position) {
+          for (const alt of alternatives) {
+            const dx = alt.x - stored.position.x;
+            const dy = alt.y - stored.position.y;
+            store.recordLocatorComparison(
+              stored,
+              alt.algorithm,
+              Math.sqrt(dx * dx + dy * dy),
+            );
+          }
+        }
       }
 
       // Calibration diagnostic: leave-one-out residual per reporting node.

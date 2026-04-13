@@ -47,6 +47,16 @@ export interface DevicePositionDTO {
     scenario?: string;
     lastSeen: number;
   };
+  /**
+   * Running distance stats from each comparison locator to our active
+   * position, per locator algorithm. Empty/undefined when nothing has
+   * been compared yet. The compare legend uses the mean to surface a
+   * "this locator was N meters off from us, on average" number.
+   */
+  locatorDeltas?: Record<
+    string,
+    { mean: number; stddev: number; count: number; lastUpdatedMs: number }
+  >;
 }
 
 export interface DevicePositionsResponse {
@@ -82,6 +92,24 @@ export function GET() {
             scenario: d.upstreamPosition.scenario,
             lastSeen: d.upstreamPosition.lastSeen,
           }
+        : undefined,
+      locatorDeltas: d.locatorComparisons
+        ? Object.fromEntries(
+            [...d.locatorComparisons.entries()].map(([algo, s]) => {
+              const mean = s.count > 0 ? s.sum / s.count : 0;
+              const variance =
+                s.count > 0 ? Math.max(0, s.sumSq / s.count - mean * mean) : 0;
+              return [
+                algo,
+                {
+                  mean,
+                  stddev: Math.sqrt(variance),
+                  count: Math.round(s.count),
+                  lastUpdatedMs: s.lastUpdatedMs,
+                },
+              ];
+            }),
+          )
         : undefined,
     });
   }

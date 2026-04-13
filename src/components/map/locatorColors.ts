@@ -21,7 +21,7 @@ export const LOCATOR_LABELS: Record<string, string> = {
   mle: "MLE",
   nearest_node: "Nearest",
   room_aware: "Room-Aware",
-  upstream_companion: "Upstream",
+  upstream_companion: "ESP-Companion",
 };
 
 export function colorForLocator(name: string): string {

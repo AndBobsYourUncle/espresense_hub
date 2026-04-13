@@ -35,6 +35,13 @@ interface MapToolContextValue {
    */
   compareMode: boolean;
   setCompareMode: (b: boolean) => void;
+  /**
+   * Algorithm keys whose ghost markers are currently hidden. Toggled
+   * from the compare legend so the user can isolate one (or a few)
+   * locators visually without losing the rest of the data.
+   */
+  hiddenLocators: ReadonlySet<string>;
+  toggleLocator: (key: string) => void;
 }
 
 const MapToolContext = createContext<MapToolContextValue | null>(null);
@@ -57,6 +64,18 @@ export default function MapToolProvider({
     null,
   );
   const [compareMode, setCompareMode] = useState(false);
+  const [hiddenLocators, setHiddenLocators] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+
+  const toggleLocator = useCallback((key: string) => {
+    setHiddenLocators((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   const setActiveTool = useCallback((next: MapTool) => {
     setActiveToolState(next);
@@ -90,6 +109,8 @@ export default function MapToolProvider({
         setInspectedNodeId,
         compareMode,
         setCompareMode,
+        hiddenLocators,
+        toggleLocator,
       }}
     >
       {children}

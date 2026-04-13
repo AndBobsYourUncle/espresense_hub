@@ -39,6 +39,20 @@ interface DeviceFileV1 {
           }
         >;
       }>;
+      /**
+       * v1.2: running distance stats from each comparison locator's
+       * output to ours. Optional for back-compat — older files without
+       * this field load with empty comparisons (start tracking fresh).
+       */
+      locatorComparisons?: Record<
+        string,
+        {
+          count: number;
+          sum: number;
+          sumSq: number;
+          lastUpdatedMs: number;
+        }
+      >;
     }
   >;
 }
@@ -128,6 +142,42 @@ export async function loadDevicePins(store: Store): Promise<void> {
       existing.push(pin);
       totalPins += 1;
     }
+
+    // v1.2: per-device locator comparison stats. Attach to the device
+    // record (creating a placeholder if MQTT hasn't seen this device
+    // yet — the comparisons are valuable enough to preserve even if
+    // the device hasn't reported in this session).
+    if (data.locatorComparisons) {
+      let dev = store.devices.get(deviceId);
+      if (!dev) {
+        dev = {
+          id: deviceId,
+          firstSeen: Date.now(),
+          lastSeen: 0,
+          measurements: new Map(),
+        };
+        store.devices.set(deviceId, dev);
+      }
+      const m = new Map<string, import("@/lib/state/store").LocatorComparisonStats>();
+      for (const [algo, s] of Object.entries(data.locatorComparisons)) {
+        if (
+          typeof s.count === "number" &&
+          typeof s.sum === "number" &&
+          typeof s.sumSq === "number" &&
+          s.count >= 0 &&
+          Number.isFinite(s.sum) &&
+          Number.isFinite(s.sumSq)
+        ) {
+          m.set(algo, {
+            count: s.count,
+            sum: s.sum,
+            sumSq: s.sumSq,
+            lastUpdatedMs: s.lastUpdatedMs ?? 0,
+          });
+        }
+      }
+      if (m.size > 0) dev.locatorComparisons = m;
+    }
   }
 
   console.log(
@@ -143,10 +193,22 @@ export async function saveDevicePins(store: Store): Promise<void> {
   const filePath = devicesPath();
   const data: DeviceFileV1 = { version: 1, devices: {} };
 
-  for (const [deviceId, pins] of store.devicePins) {
-    if (pins.length === 0) continue;
+  // Union of "has pins" and "has locator comparisons" — both should
+  // round-trip across restarts.
+  const deviceIds = new Set<string>([
+    ...store.devicePins.keys(),
+    ...[...store.devices.values()]
+      .filter((d) => d.locatorComparisons && d.locatorComparisons.size > 0)
+      .map((d) => d.id),
+  ]);
+
+  for (const deviceId of deviceIds) {
+    const pins = store.devicePins.get(deviceId) ?? [];
+    const dev = store.devices.get(deviceId);
+    const lastSeen =
+      pins.length > 0 ? Math.max(...pins.map((p) => p.timestamp)) : 0;
     data.devices[deviceId] = {
-      lastSeen: Math.max(...pins.map((p) => p.timestamp)),
+      lastSeen,
       pins: pins.map((p) => {
         const measurements: Record<string, number> = {};
         for (const [k, v] of p.measurements) measurements[k] = v;
@@ -172,6 +234,23 @@ export async function saveDevicePins(store: Store): Promise<void> {
         };
       }),
     };
+    if (dev?.locatorComparisons && dev.locatorComparisons.size > 0) {
+      const lc: Record<string, {
+        count: number;
+        sum: number;
+        sumSq: number;
+        lastUpdatedMs: number;
+      }> = {};
+      for (const [algo, s] of dev.locatorComparisons) {
+        lc[algo] = {
+          count: s.count,
+          sum: s.sum,
+          sumSq: s.sumSq,
+          lastUpdatedMs: s.lastUpdatedMs,
+        };
+      }
+      data.devices[deviceId].locatorComparisons = lc;
+    }
   }
 
   const tmp = `${filePath}.tmp`;
