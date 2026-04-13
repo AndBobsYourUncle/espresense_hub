@@ -8,6 +8,7 @@ import {
 import type { Config } from "@/lib/config";
 import { buildLocator, computeDevicePosition } from "@/lib/locators";
 import { leaveOneOutResiduals } from "@/lib/locators/calibration";
+import { publishPresence } from "@/lib/presence";
 import {
   getStore,
   recordGroundTruthResidual,
@@ -345,6 +346,17 @@ export function attachHandlers(client: MqttClient, config: Config): void {
           ...result,
           computedAt: Date.now(),
           alternatives,
+        });
+
+        // Publish HA MQTT presence — fire and forget so MQTT latency
+        // doesn't block the solve loop.
+        publishPresence({
+          deviceId: device.id,
+          deviceName: device.name ?? device.id,
+          position: result,
+          config,
+        }).catch((err) => {
+          console.error("[presence] publish failed:", (err as Error).message);
         });
 
         // Update per-locator comparison stats: distance from each

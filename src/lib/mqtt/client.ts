@@ -62,6 +62,31 @@ export function publishDeviceConfig(
   });
 }
 
+/**
+ * Low-level publish for arbitrary topics. Used by the presence publisher
+ * and anything else that needs to send to a topic not covered by the
+ * typed helpers above.
+ */
+export function publishRaw(
+  topic: string,
+  payload: string,
+  opts: { retain?: boolean; qos?: 0 | 1 | 2 } = {},
+): Promise<void> {
+  const client = getMqttClient();
+  if (!client) return Promise.reject(new Error("MQTT client not connected"));
+  return new Promise((resolve, reject) => {
+    client.publish(
+      topic,
+      payload,
+      { retain: opts.retain ?? false, qos: opts.qos ?? 1 },
+      (err) => {
+        if (err) reject(err);
+        else resolve();
+      },
+    );
+  });
+}
+
 export function connectMqtt(config: Config): MqttClient {
   const existing = globalForMqtt.__espresenseMqttClient;
   if (existing) return existing;

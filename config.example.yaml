@@ -40,6 +40,20 @@ optimization:
   # track every micro-drift.
   min_delta: 0.1
 
+# Home Assistant presence publishing. The hub always publishes a default
+# device_tracker per device (room → floor → not_home, same as the upstream
+# companion, under espresense/hub/{deviceId}). Additional zones let you
+# define coarser groupings that map as separate HA entities — useful for
+# automations that care about an area rather than a precise room.
+presence:
+  zones:
+    # Example: map several rooms to a single "master suite" entity so HA
+    # automations don't need OR conditions across three room states.
+    # - id: master_suite
+    #   label: Master Suite
+    #   type: rooms
+    #   rooms: [master_bedroom, master_bathroom, master_closet]
+
 locators:
   nadaraya_watson:
     enabled: true

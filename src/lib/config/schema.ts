@@ -297,6 +297,41 @@ export const DeviceMatchSchema = z.object({
   name: z.string().optional(),
 });
 
+// ---------------- Presence ----------------
+
+/**
+ * A "zone" is a derived Home Assistant device_tracker published alongside
+ * the default room-level tracker. Each zone produces its own HA entity
+ * with its own state string so automations can target coarser groupings
+ * without needing helpers or complex OR conditions.
+ *
+ * type: "rooms" (default) — maps a named set of rooms to a single label.
+ *   State = label when device is in any listed room, "not_home" otherwise.
+ *
+ * type: "bayesian" — future: probabilistic room model with hysteresis.
+ *   Prevents flicker at room boundaries by requiring sustained evidence
+ *   before committing a room transition.
+ */
+export const PresenceZoneSchema = z.object({
+  /** Slug used in the MQTT topic and HA unique_id. */
+  id: z.string(),
+  /** Human-readable name for the HA entity. Defaults to id. */
+  label: z.string().optional(),
+  type: z.enum(["rooms", "bayesian"]).default("rooms"),
+  /** For type "rooms": list of room ids/names that map to this zone. */
+  rooms: z.array(z.string()).default([]),
+  /** For type "bayesian": minimum posterior to commit a room transition. */
+  transition_threshold: z.number().min(0).max(1).default(0.85),
+});
+
+export type PresenceZone = z.infer<typeof PresenceZoneSchema>;
+
+export const PresenceSchema = z
+  .object({
+    zones: z.array(PresenceZoneSchema).default([]),
+  })
+  .prefault({});
+
 // ---------------- Root ----------------
 
 export const ConfigSchema = z.object({
@@ -312,6 +347,7 @@ export const ConfigSchema = z.object({
   locators: LocatorsSchema,
   filtering: FilteringSchema,
   history: HistorySchema,
+  presence: PresenceSchema,
 
   floors: z.array(FloorSchema).default([]),
   nodes: z.array(NodeSchema).default([]),
