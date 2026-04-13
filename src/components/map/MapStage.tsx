@@ -3,6 +3,7 @@
 import { useDeviceSelection } from "./DeviceSelectionProvider";
 import { useMapTool } from "./MapToolProvider";
 import { useNodeEdit } from "./NodeEditProvider";
+import { useRoomRelations } from "./RoomRelationsProvider";
 import { useRuler } from "./RulerProvider";
 
 /**
@@ -28,6 +29,7 @@ export default function MapStage({
   const { clear: clearRuler } = useRuler();
   const { editingId } = useNodeEdit();
   const { setInspectedNodeId } = useMapTool();
+  const { cancel: cancelRoomEdit, editingRoomId } = useRoomRelations();
   return (
     <div
       className="relative h-full rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm"
@@ -35,6 +37,8 @@ export default function MapStage({
       onClick={() => {
         select(null);
         setInspectedNodeId(null);
+        // Deselect the room being edited in room-relations mode.
+        if (editingRoomId) cancelRoomEdit();
         // Don't clear the ruler if the editor is open — the user might be
         // measuring a wall to drive an edit.
         if (!editingId) clearRuler();

@@ -254,12 +254,21 @@ export async function readRawConfig(): Promise<{
   return { configPath, yaml };
 }
 
-/** Update the `open_to` and optionally `floor_area` of a room. */
+/**
+ * Update the `open_to` and optionally `floor_area` of a room.
+ *
+ * `removeFromRooms` is an optional list of OTHER room ids in the same floor
+ * whose `open_to` should have `roomId` removed. Used for bidirectional
+ * cleanup: when the user unchecks a connection that was stored in the OTHER
+ * room's open_to (a reverse reference), this ensures the full edge is removed
+ * rather than just the editing room's side.
+ */
 export async function updateRoomRelations(
   floorId: string,
   roomId: string,
   openTo: string[],
   floorArea: string | null | undefined,
+  removeFromRooms: string[] = [],
 ): Promise<void> {
   const configPath = resolveConfigPath();
   let yamlText: string;
@@ -346,6 +355,31 @@ export async function updateRoomRelations(
       roomNode.set("floor_area", floorArea.trim());
     } else {
       roomNode.delete("floor_area");
+    }
+  }
+
+  // Remove `roomId` from any other rooms' open_to (reverse-ref cleanup).
+  if (removeFromRooms.length > 0) {
+    const removeSet = new Set(removeFromRooms);
+    for (let r = 0; r < rooms.items.length; r++) {
+      const item = rooms.items[r];
+      if (!isMap(item)) continue;
+      const id = item.get("id");
+      const name = item.get("name");
+      const eid =
+        typeof id === "string" && id.length > 0
+          ? id
+          : typeof name === "string"
+            ? slugify(name)
+            : null;
+      if (!eid || !removeSet.has(eid)) continue;
+      const otherOpenTo = doc.getIn(["floors", floorIdx, "rooms", r, "open_to"]);
+      if (!Array.isArray(otherOpenTo)) continue;
+      // Filter out any label that resolves to the editing roomId.
+      const filtered = (otherOpenTo as string[]).filter(
+        (label) => label !== roomId,
+      );
+      doc.setIn(["floors", floorIdx, "rooms", r, "open_to"], filtered);
     }
   }
 

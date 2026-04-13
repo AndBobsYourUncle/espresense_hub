@@ -123,7 +123,7 @@ export default function RoomOverlay({ floor, transform }: Props) {
           e.stopPropagation();
           if (isRelationsMode) {
             if (!relations.editingRoomId) {
-              relations.startEditing(floor.id ?? "", room);
+              relations.startEditing(floor.id ?? "", room, floor.rooms);
             } else if (rid === relations.editingRoomId) {
               relations.cancel();
             } else {

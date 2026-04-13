@@ -6,6 +6,8 @@ export const dynamic = "force-dynamic";
 interface PatchBody {
   open_to?: unknown;
   floor_area?: unknown;
+  /** Other room ids whose open_to should have this roomId removed (reverse-ref cleanup). */
+  remove_from_rooms?: unknown;
 }
 
 /**
@@ -46,12 +48,19 @@ export async function PATCH(
     );
   }
 
+  const removeFromRooms =
+    Array.isArray(body.remove_from_rooms) &&
+    body.remove_from_rooms.every((v) => typeof v === "string")
+      ? (body.remove_from_rooms as string[])
+      : [];
+
   try {
     await updateRoomRelations(
       floorId,
       roomId,
       body.open_to as string[],
       body.floor_area as string | null | undefined,
+      removeFromRooms,
     );
   } catch (err) {
     if (err instanceof ConfigWriteError) {
