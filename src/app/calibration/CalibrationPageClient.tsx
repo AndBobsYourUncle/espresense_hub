@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  GitCompareArrows,
   Sparkles,
   Timer,
   Trash2,
@@ -28,7 +29,9 @@ import type {
 import type { AutofitResponse } from "@/app/api/calibration/autofit/route";
 import type { ApplyResponse } from "@/app/api/calibration/apply/route";
 import type { AutoApplyAuditResponse } from "@/app/api/calibration/audit/route";
+import type { DevicePositionsResponse } from "@/app/api/devices/positions/route";
 import type { NodeFit, NodePairFit } from "@/lib/calibration/autofit";
+import { LOCATOR_LABELS } from "@/components/map/locatorColors";
 
 const POLL_MS = 2000;
 const MIN_CONFIDENT_SAMPLES = 20;
@@ -254,6 +257,7 @@ export default function CalibrationPageClient() {
       <main className="flex-1 min-h-0 p-6 overflow-auto">
         <div className="max-w-3xl space-y-4">
           <AutoApplyStatus audit={audit} />
+          <LocatorComparisonPanel />
 
           <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 px-4 py-3 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
             <p className="font-medium text-zinc-900 dark:text-zinc-100 mb-1">
@@ -841,6 +845,251 @@ function RateLimitBadge({
       {formatCountdown(clearsInMs)}
     </span>
   );
+}
+
+/**
+ * Cross-locator comparison panel. Shows running mean distance from
+ * each non-active locator's output to ours, persisted across restarts.
+ * Aggregates across all devices for the headline number; expands per-
+ * device for diagnostic drill-down. Polls /api/devices/positions every
+ * 5 s for fresh stats.
+ */
+function LocatorComparisonPanel() {
+  const { units } = useUnits();
+  const [data, setData] = useState<DevicePositionsResponse | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [openDevice, setOpenDevice] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch("/api/devices/positions", {
+          cache: "no-store",
+        });
+        if (!res.ok || cancelled) return;
+        const json = (await res.json()) as DevicePositionsResponse;
+        if (!cancelled) setData(json);
+      } catch {
+        // best-effort
+      }
+    };
+    tick();
+    const id = setInterval(tick, 5_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  const aggregates = useAggregates(data);
+  if (!data) return null;
+  const totalSamples = aggregates.reduce((s, a) => s + a.count, 0);
+  if (aggregates.length === 0 || totalSamples === 0) return null;
+
+  // Headline number: smallest mean Δ (probably IDW since it agrees with
+  // RoomAware most), and largest (probably ESP-Companion).
+  const sorted = [...aggregates].sort((a, b) => a.mean - b.mean);
+  const closest = sorted[0];
+  const farthest = sorted[sorted.length - 1];
+
+  return (
+    <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 text-xs">
+      <button
+        type="button"
+        onClick={() => setExpanded((x) => !x)}
+        className="w-full flex items-center justify-between gap-2 text-left px-4 py-3"
+      >
+        <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300">
+          <GitCompareArrows className="h-3.5 w-3.5 text-purple-500" />
+          <span className="font-medium">Locator comparison</span>
+          <span className="text-zinc-500 dark:text-zinc-400">
+            {aggregates.length} locators · {totalSamples.toLocaleString()} total
+            samples
+          </span>
+        </div>
+        <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400">
+          {closest && farthest && closest.key !== farthest.key && (
+            <>
+              <span className="text-emerald-600 dark:text-emerald-400 font-mono">
+                closest: {LOCATOR_LABELS[closest.key] ?? closest.key}{" "}
+                {formatDistanceDisplay(closest.mean, units)}
+              </span>
+              <span className="text-zinc-300 dark:text-zinc-700">·</span>
+              <span className="text-amber-600 dark:text-amber-400 font-mono">
+                farthest: {LOCATOR_LABELS[farthest.key] ?? farthest.key}{" "}
+                {formatDistanceDisplay(farthest.mean, units)}
+              </span>
+            </>
+          )}
+          <ChevronDown
+            className={`h-3 w-3 text-zinc-400 transition-transform ${expanded ? "rotate-180" : ""}`}
+          />
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="px-4 pb-3 space-y-4 border-t border-zinc-200 dark:border-zinc-800 pt-3">
+          {/* Aggregate table */}
+          <section>
+            <div className="text-xs uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
+              Aggregate (all devices, sample-weighted)
+            </div>
+            <table className="w-full text-xs font-mono tabular-nums">
+              <thead className="text-xs uppercase text-zinc-400 dark:text-zinc-500">
+                <tr>
+                  <th className="text-left font-normal py-1">locator</th>
+                  <th className="text-right font-normal py-1">mean Δ</th>
+                  <th className="text-right font-normal py-1">σ</th>
+                  <th className="text-right font-normal py-1">samples</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((a) => (
+                  <tr
+                    key={a.key}
+                    className="border-t border-zinc-100 dark:border-zinc-800/50"
+                  >
+                    <td className="py-1 text-zinc-700 dark:text-zinc-200">
+                      {LOCATOR_LABELS[a.key] ?? a.key}
+                    </td>
+                    <td className="py-1 text-right">
+                      {formatDistanceDisplay(a.mean, units)}
+                    </td>
+                    <td className="py-1 text-right text-zinc-500 dark:text-zinc-400">
+                      {formatDistanceDisplay(a.stddev, units)}
+                    </td>
+                    <td className="py-1 text-right text-zinc-500 dark:text-zinc-400">
+                      {a.count.toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+
+          {/* Per-device drill-down */}
+          <section>
+            <div className="text-xs uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
+              Per-device
+            </div>
+            <div className="space-y-1">
+              {data.devices
+                .filter(
+                  (d) =>
+                    d.locatorDeltas &&
+                    Object.keys(d.locatorDeltas).length > 0,
+                )
+                .map((d) => {
+                  const isOpen = openDevice === d.id;
+                  const entries = Object.entries(d.locatorDeltas ?? {}).sort(
+                    ([, a], [, b]) => a.mean - b.mean,
+                  );
+                  return (
+                    <div
+                      key={d.id}
+                      className="rounded border border-zinc-200 dark:border-zinc-800 overflow-hidden"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setOpenDevice(isOpen ? null : d.id)}
+                        className="w-full flex items-center justify-between gap-2 px-3 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-900/40 text-left"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          {isOpen ? (
+                            <ChevronDown className="h-3 w-3 text-zinc-400 shrink-0" />
+                          ) : (
+                            <ChevronRight className="h-3 w-3 text-zinc-400 shrink-0" />
+                          )}
+                          <span className="font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                            {d.name ?? d.id}
+                          </span>
+                        </div>
+                        <span className="text-zinc-500 dark:text-zinc-400 font-mono shrink-0">
+                          {entries.length} locators
+                        </span>
+                      </button>
+                      {isOpen && (
+                        <table className="w-full text-xs font-mono tabular-nums border-t border-zinc-100 dark:border-zinc-800/50">
+                          <tbody>
+                            {entries.map(([algo, s]) => (
+                              <tr
+                                key={algo}
+                                className="border-t border-zinc-100 dark:border-zinc-800/50 first:border-t-0"
+                              >
+                                <td className="py-1 px-3 text-zinc-700 dark:text-zinc-200">
+                                  {LOCATOR_LABELS[algo] ?? algo}
+                                </td>
+                                <td className="py-1 px-3 text-right">
+                                  {formatDistanceDisplay(s.mean, units)}
+                                </td>
+                                <td className="py-1 px-3 text-right text-zinc-500 dark:text-zinc-400 w-20">
+                                  ±{formatDistanceDisplay(s.stddev, units)}
+                                </td>
+                                <td className="py-1 px-3 text-right text-zinc-500 dark:text-zinc-400 w-20">
+                                  {s.count.toLocaleString()}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          </section>
+
+          <div className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+            Distance from each comparison locator&apos;s output to our
+            active position, averaged across the lifetime of the system
+            (persisted across restarts). Cross-device aggregate is
+            sample-weighted. Capped at 10 000 samples per pair to bound
+            precision; older samples decay proportionally past that.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Compute sample-weighted aggregate stats per locator across all devices.
+ * Sum-weighted mean and pooled-variance stddev (correct for combining
+ * different per-device sample counts).
+ */
+function useAggregates(
+  data: DevicePositionsResponse | null,
+): Array<{ key: string; mean: number; stddev: number; count: number }> {
+  if (!data) return [];
+  const sumByAlgo = new Map<string, number>();
+  const sumSqByAlgo = new Map<string, number>();
+  const countByAlgo = new Map<string, number>();
+  for (const d of data.devices) {
+    if (!d.locatorDeltas) continue;
+    for (const [algo, s] of Object.entries(d.locatorDeltas)) {
+      // Reconstruct sum and sumSq from the per-device aggregate (mean,
+      // stddev, count) so we can correctly recombine across devices.
+      // sum = mean * count; sumSq = (variance + mean²) * count
+      const sum = s.mean * s.count;
+      const variance = s.stddev * s.stddev;
+      const sumSq = (variance + s.mean * s.mean) * s.count;
+      sumByAlgo.set(algo, (sumByAlgo.get(algo) ?? 0) + sum);
+      sumSqByAlgo.set(algo, (sumSqByAlgo.get(algo) ?? 0) + sumSq);
+      countByAlgo.set(algo, (countByAlgo.get(algo) ?? 0) + s.count);
+    }
+  }
+  const out: Array<{ key: string; mean: number; stddev: number; count: number }> = [];
+  for (const [algo, count] of countByAlgo) {
+    if (count <= 0) continue;
+    const mean = (sumByAlgo.get(algo) ?? 0) / count;
+    const variance = Math.max(
+      0,
+      (sumSqByAlgo.get(algo) ?? 0) / count - mean * mean,
+    );
+    out.push({ key: algo, mean, stddev: Math.sqrt(variance), count });
+  }
+  return out;
 }
 
 /** Format a positive ms duration as "Mm SSs" or "MM:SS" for short windows. */
