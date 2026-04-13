@@ -104,22 +104,27 @@ export default function RoomOverlay({ floor, transform }: Props) {
           const b = pts[(i + 1) % pts.length];
           const mx = (a[0] + b[0]) / 2;
           const my = (a[1] + b[1]) / 2;
-          // Offset the test point perpendicular to the edge in both directions.
-          // Testing the raw midpoint is unreliable when two rooms share an edge
-          // exactly: the midpoint lies on the boundary of the adjacent polygon
-          // and ray-casting returns inconsistent results there.
+          // Compute the outward-facing perpendicular by comparing against the
+          // room centroid — we only probe in the outward direction.  Testing
+          // both sides is wrong: on narrow rooms the inward probe crosses the
+          // room and lands inside a sibling on the far wall, incorrectly
+          // suppressing exterior edges.
           const edgeLen = Math.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2);
-          const nx = edgeLen > 1e-9 ? -(b[1] - a[1]) / edgeLen : 0;
-          const ny = edgeLen > 1e-9 ?  (b[0] - a[0]) / edgeLen : 0;
+          if (edgeLen < 1e-9) continue;
+          const px = -(b[1] - a[1]) / edgeLen; // one perpendicular unit dir
+          const py =  (b[0] - a[0]) / edgeLen;
+          const [cx, cy] = polygonCentroid(pts as [number, number][]);
+          // centroid should be on the inward side; flip to get outward
+          const inward = (cx - mx) * px + (cy - my) * py > 0;
+          const outx = inward ? -px : px;
+          const outy = inward ? -py : py;
           const TOL = 0.08; // metres — bridges shared walls and small gaps
-          const interior = rooms.some((other) => {
-            if (other === room || other.points == null) return false;
-            const poly = other.points;
-            return (
-              pointInPolygon(mx + nx * TOL, my + ny * TOL, poly) ||
-              pointInPolygon(mx - nx * TOL, my - ny * TOL, poly)
-            );
-          });
+          const interior = rooms.some(
+            (other) =>
+              other !== room &&
+              other.points != null &&
+              pointInPolygon(mx + outx * TOL, my + outy * TOL, other.points),
+          );
           if (!interior) {
             edges.push({
               x1: tx(transform, a[0]),
