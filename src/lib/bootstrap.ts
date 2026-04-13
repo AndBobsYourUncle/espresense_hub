@@ -16,6 +16,7 @@ import { loadConfig, ConfigNotFoundError } from "@/lib/config";
 import { connectMqtt } from "@/lib/mqtt/client";
 import { attachHandlers } from "@/lib/mqtt/handler";
 import { loadDevicePins, saveDevicePins } from "@/lib/state/device_persistence";
+import { runDeviceCleanup } from "@/lib/state/device_cleanup";
 import {
   setKalmanMeasurementNoise,
   setKalmanProcessNoise,
@@ -199,6 +200,15 @@ export async function bootstrap(): Promise<void> {
         console.error("[bootstrap] saveDevicePins failed", err),
       );
     }, CALIBRATION_SAVE_INTERVAL_MS);
+
+    // Device away-timeout + retention cleanup — runs every 30 s.
+    // Marks devices as away when lastSeen exceeds away_timeout, and
+    // removes them from memory when lastSeen exceeds device_retention.
+    setInterval(() => {
+      runDeviceCleanup(store, config).catch((err) =>
+        console.error("[bootstrap] device cleanup failed:", (err as Error).message),
+      );
+    }, 30_000);
 
     // Periodic audit + rate-limit save — keeps the auto-apply forensic
     // log durable across restarts and prevents the rate-limit map from

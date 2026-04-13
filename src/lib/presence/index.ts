@@ -200,6 +200,54 @@ async function ensureDiscovery(
   );
 }
 
+// ─── Away publishing ──────────────────────────────────────────────────────────
+
+/**
+ * Publish "not_home" to all presence trackers for a device that has gone away
+ * (away_timeout elapsed). Only publishes when state actually changed so we
+ * don't churn the broker on every cleanup tick.
+ */
+export async function publishDeviceAway({
+  deviceId,
+  deviceName,
+  config,
+}: {
+  deviceId: string;
+  deviceName: string;
+  config: Config;
+}): Promise<void> {
+  const discoveryPrefix = config.mqtt.discovery_topic ?? "homeassistant";
+  const s = state();
+
+  const defKey = `${deviceId}::__default__`;
+  if (s.lastState.get(defKey) !== "not_home") {
+    s.lastState.set(defKey, "not_home");
+    await ensureDiscovery(deviceId, deviceName, discoveryPrefix);
+    await publishRaw(stateTopic(deviceId), "not_home", {
+      retain: false,
+      qos: 1,
+    });
+  }
+
+  for (const zone of config.presence.zones) {
+    const zKey = `${deviceId}::${zone.id}`;
+    if (s.lastState.get(zKey) !== "not_home") {
+      s.lastState.set(zKey, "not_home");
+      await ensureDiscovery(
+        deviceId,
+        deviceName,
+        discoveryPrefix,
+        zone.id,
+        zone.label,
+      );
+      await publishRaw(stateTopic(deviceId, zone.id), "not_home", {
+        retain: false,
+        qos: 1,
+      });
+    }
+  }
+}
+
 // ─── Main publish entry point ─────────────────────────────────────────────────
 
 export interface PresencePublishInput {

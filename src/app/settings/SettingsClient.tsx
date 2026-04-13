@@ -7,6 +7,7 @@ import {
   Check,
   FileText,
   Loader2,
+  MapPin,
   Plus,
   RefreshCw,
   Router,
@@ -54,6 +55,7 @@ type TabKey =
   | "devices"
   | "nodes"
   | "rooms"
+  | "presence"
   | "advanced";
 
 const TABS: Array<{
@@ -69,6 +71,7 @@ const TABS: Array<{
   { key: "devices", label: "Devices", icon: Smartphone, hint: "Tracked + excluded device matchers" },
   { key: "nodes", label: "Nodes", icon: Router, hint: "Per-node metadata (positions: edit on map)" },
   { key: "rooms", label: "Rooms", icon: Square, hint: "Room adjacency (polygons: edit in YAML)" },
+  { key: "presence", label: "Presence", icon: MapPin, hint: "Home Assistant presence zones" },
   { key: "advanced", label: "Advanced", icon: Code, hint: "Raw YAML editor" },
 ];
 
@@ -385,6 +388,8 @@ export default function SettingsClient() {
           <NodesTab doc={doc} setField={setField} addToList={addToList} deleteAt={deleteAt} />
         ) : tab === "rooms" ? (
           <RoomsTab doc={doc} setField={setField} addToList={addToList} deleteAt={deleteAt} />
+        ) : tab === "presence" ? (
+          <PresenceTab doc={doc} setField={setField} addToList={addToList} deleteAt={deleteAt} />
         ) : (
           <AdvancedTab yaml={yaml} setRawYaml={setRawYaml} />
         )}
@@ -1434,6 +1439,107 @@ function RoomsTab({ doc, setField, addToList, deleteAt }: DocListProps) {
           </Section>
         );
       })}
+    </>
+  );
+}
+
+interface PresenceZoneData {
+  id?: string;
+  label?: string;
+  type?: "rooms" | "bayesian";
+  rooms?: string[];
+  transition_threshold?: number;
+}
+
+function PresenceTab({ doc, setField, addToList, deleteAt }: DocListProps) {
+  const data = doc.toJS() as { presence?: { zones?: PresenceZoneData[] } };
+  const zones = data.presence?.zones ?? [];
+
+  return (
+    <>
+      <Section
+        title="Presence zones"
+        description="Extra Home Assistant device_tracker entities published alongside the default room-level tracker. Each zone maps a set of rooms to a coarser label so automations can target an area (e.g. 'Master Suite') without OR conditions across multiple rooms. Changes apply on the next position update — no restart required."
+      >
+        {zones.length === 0 ? (
+          <EmptyList message="No zones configured. By default the hub publishes one tracker per device at room → floor → not_home granularity (espresense/hub/{deviceId})." />
+        ) : (
+          zones.map((z, i) => (
+            <ListRow
+              key={`z-${i}`}
+              onDelete={() => deleteAt(["presence", "zones", i])}
+            >
+              <MiniField label="ID" hint="Slug used in the MQTT topic and HA unique_id. No spaces.">
+                <TextInput
+                  value={z.id ?? ""}
+                  onChange={(v) => setField(["presence", "zones", i, "id"], v)}
+                  placeholder="master_suite"
+                />
+              </MiniField>
+              <MiniField label="Label" hint="Human-readable HA entity name. Defaults to id if blank.">
+                <TextInput
+                  value={z.label ?? ""}
+                  onChange={(v) =>
+                    setField(["presence", "zones", i, "label"], v || undefined)
+                  }
+                  placeholder="Master Suite"
+                />
+              </MiniField>
+              <MiniField label="Type">
+                <Select<"rooms" | "bayesian">
+                  value={z.type ?? "rooms"}
+                  onChange={(v) => setField(["presence", "zones", i, "type"], v)}
+                  options={[
+                    { value: "rooms", label: "Rooms", hint: "Map a list of rooms to one label" },
+                    { value: "bayesian", label: "Bayesian", hint: "Probabilistic — coming soon" },
+                  ]}
+                />
+              </MiniField>
+              {(z.type ?? "rooms") === "rooms" && (
+                <MiniField
+                  label="Rooms"
+                  hint="Comma-separated room ids/names. Device is 'in zone' when it's in any of these rooms."
+                >
+                  <CommaList
+                    value={z.rooms ?? []}
+                    onChange={(v) =>
+                      setField(["presence", "zones", i, "rooms"], v ?? [])
+                    }
+                    placeholder="master_bedroom, master_bathroom, master_closet"
+                  />
+                </MiniField>
+              )}
+              {(z.type ?? "rooms") === "bayesian" && (
+                <MiniField
+                  label="Transition threshold"
+                  hint="Minimum posterior probability (0–1) to commit a room change."
+                >
+                  <NumberInput
+                    value={z.transition_threshold ?? 0.85}
+                    onChange={(v) =>
+                      setField(["presence", "zones", i, "transition_threshold"], v)
+                    }
+                    min={0}
+                    max={1}
+                    step={0.05}
+                  />
+                </MiniField>
+              )}
+            </ListRow>
+          ))
+        )}
+        <AddButton
+          label="Add zone"
+          onClick={() =>
+            addToList(["presence", "zones"], {
+              id: "new_zone",
+              label: "New Zone",
+              type: "rooms",
+              rooms: [],
+            })
+          }
+        />
+      </Section>
     </>
   );
 }
