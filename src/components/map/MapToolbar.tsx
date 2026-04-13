@@ -33,21 +33,37 @@ const TOOLS: ToolDef[] = [
 ];
 
 /**
- * Toolbar shown above the map in its own static row. Renders outside the
- * MapStage so it stays anchored — the rest of the map UI (panels, legends)
- * is draggable and can be moved out of the way, but tool selection should
- * always be in the same place. Tool buttons (Inspect / Ruler / Pin) are
- * mutually exclusive; the Compare toggle on the right is independent — it
- * overlays raw-locator ghost markers on top of the active locator's
- * results so the user can visually see the delta.
+ * Toolbar shown above (or alongside) the map. Renders outside MapStage
+ * so it stays anchored — the rest of the map UI (panels, legends) is
+ * draggable, but tool selection lives in a fixed spot.
+ *
+ * Two orientations:
+ *   - `horizontal` (default): single row, lives in the page header.
+ *   - `vertical`: stacked column, used when floated alongside the map
+ *     (mobile landscape, where header height is precious).
+ *
+ * Tool buttons (Inspect / Ruler / Pin) are mutually exclusive; the
+ * Compare toggle on the right (or bottom) is independent — overlays
+ * raw-locator ghost markers on top of the active locator's results.
  */
-export default function MapToolbar() {
+export default function MapToolbar({
+  orientation = "horizontal",
+  className = "",
+}: {
+  orientation?: "horizontal" | "vertical";
+  className?: string;
+}) {
   const { activeTool, setActiveTool, compareMode, setCompareMode } =
     useMapTool();
+  const isVertical = orientation === "vertical";
 
   return (
     <div
-      className="shrink-0 inline-flex items-center gap-0.5 p-1 rounded-lg bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 shadow-sm self-start"
+      className={`${
+        isVertical
+          ? "inline-flex flex-col items-stretch"
+          : "inline-flex items-center"
+      } gap-0.5 p-1 rounded-lg bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 shadow-sm self-start shrink-0 ${className}`}
       role="toolbar"
       aria-label="Map tools"
     >
@@ -71,7 +87,13 @@ export default function MapToolbar() {
           </button>
         );
       })}
-      <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-800 mx-0.5" />
+      <div
+        className={
+          isVertical
+            ? "h-px w-full bg-zinc-200 dark:bg-zinc-800 my-0.5"
+            : "w-px h-5 bg-zinc-200 dark:bg-zinc-800 mx-0.5"
+        }
+      />
       <button
         type="button"
         onClick={() => setCompareMode(!compareMode)}

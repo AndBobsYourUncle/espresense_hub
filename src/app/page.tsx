@@ -102,11 +102,20 @@ export default async function MapPage() {
                   <PageHeader
                     title="Map"
                     description={summary}
-                    inline={<MapToolbar />}
+                    inline={
+                      <MapToolbar className="max-md:landscape:hidden" />
+                    }
                   />
                   <main className="flex-1 min-h-0 p-6">
                     <MapStage>
                       <FloorPlan config={config} floor={floor} />
+                      {/* Floating vertical toolbar — only in mobile
+                          landscape, where header vertical space is at a
+                          premium and the map is wide+short. */}
+                      <MapToolbar
+                        orientation="vertical"
+                        className="hidden max-md:landscape:inline-flex absolute top-2 left-2 z-10"
+                      />
                       <CompareLegend />
                       <DeviceDetailPanel />
                       <NodeInspectionPanel nodes={floorNodes} />

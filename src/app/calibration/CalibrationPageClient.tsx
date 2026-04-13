@@ -302,7 +302,7 @@ export default function CalibrationPageClient() {
                     <Th className="text-right whitespace-nowrap hidden @5xl:table-cell">
                       samples
                     </Th>
-                    <Th className="text-right whitespace-nowrap">
+                    <Th className="text-right whitespace-nowrap hidden @sm:table-cell">
                       LOO bias
                       <div className="text-xs normal-case font-normal tracking-normal text-zinc-400 whitespace-nowrap">
                         leave-one-out
@@ -339,7 +339,7 @@ export default function CalibrationPageClient() {
                         className="border-t border-zinc-100 dark:border-zinc-800/60 hover:bg-zinc-50 dark:hover:bg-zinc-900/30 cursor-pointer"
                       >
                         <Td>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
                             {hasPairs ? (
                               isExpanded ? (
                                 <ChevronDown className="h-3 w-3 text-zinc-400 shrink-0" />
@@ -347,14 +347,14 @@ export default function CalibrationPageClient() {
                                 <ChevronRight className="h-3 w-3 text-zinc-400 shrink-0" />
                               )
                             ) : (
-                              <span className="w-3" />
+                              <span className="w-3 shrink-0" />
                             )}
-                            <span className={`h-2 w-2 rounded-full ${cls.dot}`} />
-                            <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                            <span
+                              className={`h-2 w-2 rounded-full shrink-0 ${cls.dot}`}
+                              title={cls.label}
+                            />
+                            <span className="font-medium text-zinc-900 dark:text-zinc-100 truncate">
                               {n.nodeId}
-                            </span>
-                            <span className="text-xs text-zinc-400">
-                              {cls.label}
                             </span>
                             <RateLimitBadge nodeId={n.nodeId} audit={audit} />
                           </div>
@@ -391,7 +391,7 @@ export default function CalibrationPageClient() {
                         <Td className="text-right hidden @5xl:table-cell">
                           <SampleCountCell count={n.gtCount} />
                         </Td>
-                        <Td className="text-right">
+                        <Td className="text-right hidden @sm:table-cell">
                           <BiasCell
                             mean={n.meanResidualMeters}
                             stddev={n.stddevMeters}
