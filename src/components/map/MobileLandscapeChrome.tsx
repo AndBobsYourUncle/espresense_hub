@@ -25,7 +25,7 @@ export default function MobileLandscapeChrome({
   const { toggle } = useMobileNav();
   return (
     <div className="absolute top-2 left-2 z-10 flex flex-col gap-2 items-start">
-      <div className="inline-flex flex-col items-stretch gap-1 p-1.5 rounded-lg bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 shadow-sm w-[72px]">
+      <div className="inline-flex flex-col items-stretch gap-1 p-1.5 rounded-lg bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 shadow-sm">
         <button
           type="button"
           onClick={toggle}
@@ -34,11 +34,11 @@ export default function MobileLandscapeChrome({
         >
           <Menu className="h-4 w-4" />
         </button>
-        <div className="text-xs text-zinc-500 dark:text-zinc-400 text-center leading-tight">
+        <div className="text-xs text-zinc-500 dark:text-zinc-400 text-center leading-tight px-1">
           <div className="font-semibold text-zinc-900 dark:text-zinc-100">
             Map
           </div>
-          <div className="text-[10px] break-words">{summary}</div>
+          <div className="text-[10px] whitespace-nowrap">{summary}</div>
         </div>
       </div>
       <MapToolbar orientation="vertical" />

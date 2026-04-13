@@ -158,14 +158,22 @@ export default function Sidebar() {
       <div className="shrink-0 p-3 border-t border-zinc-200 dark:border-zinc-800 space-y-2">
         <div
           className="px-3 py-1 text-xs space-y-1"
-          title={status?.mqtt.error ?? undefined}
+          title={
+            // Shove the host detail into the tooltip when it's hidden
+            // from the inline view (mobile landscape) so it remains
+            // discoverable on hover/long-press.
+            status?.mqtt.error ?? status?.mqtt.host ?? undefined
+          }
         >
           <div className={`flex items-center gap-2 ${style.text}`}>
-            <span className={`h-2 w-2 rounded-full ${style.dot}`} />
+            <span className={`h-2 w-2 rounded-full shrink-0 ${style.dot}`} />
             <span className="font-medium">MQTT {style.label}</span>
           </div>
           {detail && (
-            <div className="pl-4 text-zinc-400 dark:text-zinc-500 font-mono truncate">
+            // Hide the IP/host line in mobile landscape — sidebar
+            // height is at a premium there. Tooltip on the parent
+            // still surfaces it.
+            <div className="pl-4 text-zinc-400 dark:text-zinc-500 font-mono truncate max-lg:landscape:hidden">
               {detail}
             </div>
           )}
