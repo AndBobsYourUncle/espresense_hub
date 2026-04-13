@@ -103,11 +103,12 @@ export default async function MapPage() {
                     title="Map"
                     description={summary}
                     inline={
-                      // Hide the header toolbar only in mobile landscape;
-                      // the floating vertical version below takes over.
-                      // Wrap so we control visibility independently of
-                      // MapToolbar's own internal display utilities.
-                      <div className="max-md:landscape:hidden">
+                      // Hide the header toolbar in mobile landscape; the
+                      // floating vertical version below takes over. The
+                      // breakpoint here matches the sidebar's collapse
+                      // condition (`< lg` width while landscape) — both
+                      // surfaces switch to mobile chrome together.
+                      <div className="max-lg:landscape:hidden">
                         <MapToolbar />
                       </div>
                     }
@@ -115,10 +116,11 @@ export default async function MapPage() {
                   <main className="flex-1 min-h-0 p-6">
                     <MapStage>
                       <FloorPlan config={config} floor={floor} />
-                      {/* Floating vertical toolbar — only in mobile
-                          landscape, where header vertical space is at a
-                          premium and the map is wide+short. */}
-                      <div className="hidden max-md:landscape:block absolute top-2 left-2 z-10">
+                      {/* Floating vertical toolbar — appears when the
+                          sidebar is collapsed AND viewport is landscape
+                          (typical mobile landscape). Saves precious
+                          header vertical space. */}
+                      <div className="hidden max-lg:landscape:block absolute top-2 left-2 z-10">
                         <MapToolbar orientation="vertical" />
                       </div>
                       <CompareLegend />

@@ -27,7 +27,7 @@ export default function PageHeader({
           type="button"
           onClick={toggle}
           aria-label="Open navigation menu"
-          className="md:hidden h-9 w-9 inline-flex items-center justify-center rounded-md text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900"
+          className="md:portrait:hidden lg:landscape:hidden h-9 w-9 inline-flex items-center justify-center rounded-md text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900"
         >
           <Menu className="h-5 w-5" />
         </button>

@@ -95,13 +95,16 @@ export default function Sidebar() {
   return (
     <>
       {/* Backdrop — only renders when the mobile drawer is open. Click to
-          close. Hidden at md+ where the sidebar is always-visible chrome. */}
+          close. Hidden when the sidebar is always-visible chrome — that
+          happens at md+ portrait OR lg+ landscape (mobile landscape
+          often exceeds 768 px width but height is still constrained,
+          so we hold the sidebar back to lg there). */}
       <button
         type="button"
         aria-hidden={!open}
         tabIndex={open ? 0 : -1}
         onClick={close}
-        className={`md:hidden fixed inset-0 z-40 bg-black/40 backdrop-blur-sm transition-opacity ${
+        className={`md:portrait:hidden lg:landscape:hidden fixed inset-0 z-40 bg-black/40 backdrop-blur-sm transition-opacity ${
           open
             ? "opacity-100 pointer-events-auto"
             : "opacity-0 pointer-events-none"
@@ -113,8 +116,9 @@ export default function Sidebar() {
           border-r border-zinc-200 dark:border-zinc-800
           fixed inset-y-0 left-0 z-50 w-60
           transition-transform duration-200 ease-out
-          md:static md:translate-x-0 md:shrink-0
-          ${open ? "translate-x-0 shadow-2xl md:shadow-none" : "-translate-x-full md:translate-x-0"}
+          md:portrait:static md:portrait:translate-x-0 md:portrait:shrink-0
+          lg:landscape:static lg:landscape:translate-x-0 lg:landscape:shrink-0
+          ${open ? "translate-x-0 shadow-2xl md:portrait:shadow-none lg:landscape:shadow-none" : "-translate-x-full md:portrait:translate-x-0 lg:landscape:translate-x-0"}
         `}
         onClick={(e) => {
           // Close drawer when a nav link is clicked. The link's own
