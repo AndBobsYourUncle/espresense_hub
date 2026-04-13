@@ -55,12 +55,21 @@ export function resolveLocation(
   pos: { x: number; y: number; z: number },
   config: Config,
 ): ResolvedLocation {
+  // The first floor whose Z-bounds pass is kept as a fallback so that a device
+  // detected between rooms still publishes the floor name instead of "not_home".
+  let floorFallback: { floorId: string | null; floorName: string | null } | null = null;
+
   for (const floor of config.floors) {
     // Z-range check — skip floors whose bounds clearly exclude this Z.
     if (floor.bounds) {
       const [, [, , maxZ]] = floor.bounds;
       const [[, , minZ]] = floor.bounds;
       if (pos.z < minZ || pos.z > maxZ) continue;
+    }
+
+    // This floor's Z-range passed — record it as a fallback.
+    if (!floorFallback) {
+      floorFallback = { floorId: floor.id ?? null, floorName: floor.name ?? null };
     }
 
     const roomId = findRoom(floor.rooms, [pos.x, pos.y]);
@@ -78,7 +87,16 @@ export function resolveLocation(
       };
     }
   }
-  return { roomId: null, roomName: null, floorId: null, floorName: null };
+
+  // No room matched — but if a floor's Z-range matched we still know which
+  // floor the device is on. defaultState() will publish the floor id rather
+  // than "not_home".
+  return {
+    roomId: null,
+    roomName: null,
+    floorId: floorFallback?.floorId ?? null,
+    floorName: floorFallback?.floorName ?? null,
+  };
 }
 
 // ─── Zone state computation ───────────────────────────────────────────────────
