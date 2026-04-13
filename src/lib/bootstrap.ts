@@ -1,6 +1,6 @@
 import {
   AUTO_APPLY_INITIAL_DELAY_MS,
-  AUTO_APPLY_INTERVAL_MS,
+  getAutoApplyIntervalMs,
   isAutoApplyEnabled,
   runAutoApplyCycle,
   setAutoApplyConfig,
@@ -170,7 +170,7 @@ export async function bootstrap(): Promise<void> {
           runAutoApplyCycle().catch((err) =>
             console.error("[bootstrap] auto-apply cycle failed", err),
           );
-        }, AUTO_APPLY_INTERVAL_MS);
+        }, getAutoApplyIntervalMs());
       }, AUTO_APPLY_INITIAL_DELAY_MS);
     } else {
       console.log("[bootstrap] auto-apply disabled by config");

@@ -39,17 +39,31 @@ const N_MAX = 7.0;
 export const PER_NODE_RATE_LIMIT_MS = 10 * 60_000;
 
 /**
- * How often the auto-apply check runs. Mutable — settable from
- * `optimization.interval_secs` in config.yaml at bootstrap. Defaults
- * to 5 min, which is much faster than the upstream companion's
- * 1-hour default but matches our streaming-stats philosophy (apply
- * small corrections often, not big ones rarely).
+ * Module-private mutable state, accessed only via the getters below.
+ *
+ * Why getters and not `export let`: bundlers (Webpack / Turbopack)
+ * compile ESM imports to CommonJS-style snapshots in many configs,
+ * so consumers of `import { AUTO_APPLY_INTERVAL_MS }` would see the
+ * value at *module load time*, not the live value after
+ * `setAutoApplyConfig`. Getter functions sidestep the issue —
+ * every call resolves the current value, regardless of how the
+ * bundler treats the import.
  */
-export let AUTO_APPLY_INTERVAL_MS = 5 * 60_000;
+let intervalMs = 5 * 60_000;
+let autoApplyEnabled = true;
+
+/** First-cycle delay after boot. Constant — no need to make tunable. */
 export const AUTO_APPLY_INITIAL_DELAY_MS = 60_000;
 
-/** Whether the auto-apply background job runs at all. */
-let autoApplyEnabled = true;
+/** Current cycle interval in milliseconds. */
+export function getAutoApplyIntervalMs(): number {
+  return intervalMs;
+}
+
+/** Whether the auto-apply background loop runs at all. */
+export function isAutoApplyEnabled(): boolean {
+  return autoApplyEnabled;
+}
 
 /** Configure auto-apply from the `optimization` config block. */
 export function setAutoApplyConfig(opts: {
@@ -58,12 +72,8 @@ export function setAutoApplyConfig(opts: {
 }): void {
   autoApplyEnabled = opts.enabled;
   if (opts.intervalSecs > 0 && Number.isFinite(opts.intervalSecs)) {
-    AUTO_APPLY_INTERVAL_MS = opts.intervalSecs * 1000;
+    intervalMs = opts.intervalSecs * 1000;
   }
-}
-
-export function isAutoApplyEnabled(): boolean {
-  return autoApplyEnabled;
 }
 
 /** Track when each node was last auto-applied so we can rate-limit. */

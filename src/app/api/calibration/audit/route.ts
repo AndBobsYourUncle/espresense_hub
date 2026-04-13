@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import {
-  AUTO_APPLY_INTERVAL_MS,
   getAutoApplyAuditLog,
+  getAutoApplyIntervalMs,
   getAutoApplyState,
   PER_NODE_RATE_LIMIT_MS,
   type AutoApplyEvent,
@@ -28,7 +28,7 @@ export interface AutoApplyAuditResponse {
 export function GET(): Response {
   const state = getAutoApplyState();
   const body: AutoApplyAuditResponse = {
-    cycleIntervalMs: AUTO_APPLY_INTERVAL_MS,
+    cycleIntervalMs: getAutoApplyIntervalMs(),
     rateLimitMs: PER_NODE_RATE_LIMIT_MS,
     events: getAutoApplyAuditLog().slice(),
     lastAutoApplyByNode: state.lastAutoApplyByNode,
