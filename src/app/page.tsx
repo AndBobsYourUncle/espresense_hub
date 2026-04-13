@@ -5,6 +5,7 @@ import DeviceSelectionProvider from "@/components/map/DeviceSelectionProvider";
 import FloorPlan from "@/components/map/FloorPlan";
 import MapStage from "@/components/map/MapStage";
 import MapToolbar from "@/components/map/MapToolbar";
+import MobileLandscapeChrome from "@/components/map/MobileLandscapeChrome";
 import MapToolProvider from "@/components/map/MapToolProvider";
 import NodeEditPanel from "@/components/map/NodeEditPanel";
 import NodeEditProvider from "@/components/map/NodeEditProvider";
@@ -99,29 +100,25 @@ export default async function MapPage() {
             <NodeEditProvider>
               <MapToolProvider>
                 <PinHighlightProvider>
-                  <PageHeader
-                    title="Map"
-                    description={summary}
-                    inline={
-                      // Hide the header toolbar in mobile landscape; the
-                      // floating vertical version below takes over. The
-                      // breakpoint here matches the sidebar's collapse
-                      // condition (`< lg` width while landscape) — both
-                      // surfaces switch to mobile chrome together.
-                      <div className="max-lg:landscape:hidden">
-                        <MapToolbar />
-                      </div>
-                    }
-                  />
-                  <main className="flex-1 min-h-0 p-6">
+                  {/* Page header — hidden in mobile landscape, where
+                      the floating MobileLandscapeChrome takes over so
+                      the map gets the full vertical height. */}
+                  <div className="max-lg:landscape:hidden">
+                    <PageHeader
+                      title="Map"
+                      description={summary}
+                      inline={<MapToolbar />}
+                    />
+                  </div>
+                  <main className="flex-1 min-h-0 p-6 max-lg:landscape:p-2">
                     <MapStage>
                       <FloorPlan config={config} floor={floor} />
-                      {/* Floating vertical toolbar — appears when the
-                          sidebar is collapsed AND viewport is landscape
-                          (typical mobile landscape). Saves precious
-                          header vertical space. */}
-                      <div className="hidden max-lg:landscape:block absolute top-2 left-2 z-10">
-                        <MapToolbar orientation="vertical" />
+                      {/* Combined floating chrome (hamburger + title +
+                          vertical toolbar) for mobile landscape. Lets
+                          the map fill the full vertical height while
+                          keeping nav, identity, and tools accessible. */}
+                      <div className="hidden max-lg:landscape:block">
+                        <MobileLandscapeChrome summary={summary} />
                       </div>
                       <CompareLegend />
                       <DeviceDetailPanel />
