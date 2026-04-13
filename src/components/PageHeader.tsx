@@ -17,7 +17,7 @@ export default function PageHeader({
         <div className="min-w-0">
           <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
           {description && (
-            <p className="text-xs text-zinc-500 truncate">{description}</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">{description}</p>
           )}
         </div>
         {inline && <div className="flex items-center gap-2">{inline}</div>}

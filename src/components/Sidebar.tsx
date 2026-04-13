@@ -46,7 +46,7 @@ const STATUS_STYLES: Record<
   disconnected: {
     dot: "bg-zinc-400",
     label: "Disconnected",
-    text: "text-zinc-500",
+    text: "text-zinc-500 dark:text-zinc-400",
   },
   error: {
     dot: "bg-red-500",
@@ -151,7 +151,7 @@ export default function Sidebar() {
               className={`px-2 py-0.5 transition-colors ${
                 units === "metric"
                   ? "bg-blue-500 text-white"
-                  : "text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
+                  : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900"
               }`}
               aria-pressed={units === "metric"}
             >
@@ -163,7 +163,7 @@ export default function Sidebar() {
               className={`px-2 py-0.5 transition-colors ${
                 units === "imperial"
                   ? "bg-blue-500 text-white"
-                  : "text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
+                  : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900"
               }`}
               aria-pressed={units === "imperial"}
             >

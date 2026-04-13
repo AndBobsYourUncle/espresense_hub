@@ -48,7 +48,7 @@ function OffsetRow({
 }) {
   return (
     <label className="flex items-center gap-2">
-      <span className="w-20 text-xs text-zinc-500">{label}</span>
+      <span className="w-20 text-xs text-zinc-500 dark:text-zinc-400">{label}</span>
       <DistanceInput valueMeters={value} onChangeMeters={onChange} />
     </label>
   );
@@ -140,7 +140,7 @@ function WallEditor() {
           <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
             {selectedWall.roomName}
           </div>
-          <div className="text-xs font-mono text-zinc-500">
+          <div className="text-xs font-mono text-zinc-500 dark:text-zinc-400">
             {formatDistanceDisplay(selectedWall.length, units)} long
           </div>
         </div>
@@ -166,7 +166,7 @@ function WallEditor() {
       </div>
 
       {draft && (
-        <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 text-xs font-mono text-zinc-500 flex justify-between">
+        <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 text-xs font-mono text-zinc-500 dark:text-zinc-400 flex justify-between">
           <span>computed</span>
           <span className="text-zinc-900 dark:text-zinc-100">
             {formatDistanceDisplay(draft[0], units)},{" "}
@@ -228,7 +228,7 @@ function CornerEditor() {
             ? selectedCorner.roomNames.join(" · ")
             : "Room corner"}
         </div>
-        <div className="text-xs font-mono text-zinc-500">
+        <div className="text-xs font-mono text-zinc-500 dark:text-zinc-400">
           ({formatDistanceDisplay(selectedCorner.point[0], units)},{" "}
           {formatDistanceDisplay(selectedCorner.point[1], units)})
         </div>
@@ -246,7 +246,7 @@ function CornerEditor() {
       </p>
 
       {draft && (
-        <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 text-xs font-mono text-zinc-500 flex justify-between">
+        <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 text-xs font-mono text-zinc-500 dark:text-zinc-400 flex justify-between">
           <span>computed</span>
           <span className="text-zinc-900 dark:text-zinc-100">
             {formatDistanceDisplay(draft[0], units)},{" "}
@@ -276,7 +276,7 @@ function PickPrompt() {
       <div className="text-sm text-zinc-700 dark:text-zinc-300 font-medium">
         Pick a wall or corner on the map
       </div>
-      <p className="mt-2 text-xs text-zinc-500 leading-relaxed">
+      <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
         Every wall is highlighted in blue and every corner is a clickable
         dot. Click a wall to enter an offset along it, or a corner to enter
         ΔX / ΔY offsets — whichever is easier to measure with a tape.
@@ -362,7 +362,7 @@ export default function NodeEditPanel({ nodes }: Props) {
         <button
           type="button"
           onClick={cancel}
-          className="h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:text-zinc-100 dark:hover:bg-zinc-900"
+          className="h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:text-zinc-100 dark:hover:bg-zinc-900"
           aria-label="Cancel"
         >
           <X className="h-3.5 w-3.5" />
@@ -424,7 +424,7 @@ export default function NodeEditPanel({ nodes }: Props) {
           onClick={(e) => e.stopPropagation()}
           className="fixed top-20 left-1/2 -translate-x-1/2 z-50 inline-flex items-center gap-3 px-4 py-2 rounded-full bg-white/95 dark:bg-zinc-950/95 backdrop-blur border border-zinc-200 dark:border-zinc-800 shadow-lg text-xs"
         >
-          <span className="text-zinc-500">
+          <span className="text-zinc-500 dark:text-zinc-400">
             Editing{" "}
             <span className="font-medium text-zinc-900 dark:text-zinc-100">
               {node?.name ?? editingId}
@@ -434,7 +434,7 @@ export default function NodeEditPanel({ nodes }: Props) {
           <button
             type="button"
             onClick={cancelSnapPlacement}
-            className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium"
+            className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 font-medium"
           >
             Cancel
           </button>

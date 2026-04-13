@@ -91,7 +91,7 @@ function MeasurementRow({
           {badge.label}
         </span>
       </div>
-      <div className="mt-1 grid grid-cols-3 gap-1.5 text-zinc-500 font-mono">
+      <div className="mt-1 grid grid-cols-3 gap-1.5 text-zinc-500 dark:text-zinc-400 font-mono">
         <div>
           <div className="text-xs text-zinc-400 uppercase">measured</div>
           <div>
@@ -114,7 +114,7 @@ function MeasurementRow({
         </div>
       </div>
       {hasCorrection && m.correctedDistance != null && m.nEffective != null && (
-        <div className="mt-1.5 text-xs text-zinc-500 font-mono flex items-center justify-between gap-2">
+        <div className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-400 font-mono flex items-center justify-between gap-2">
           <span className="text-zinc-400 uppercase">path-aware</span>
           <span>
             → {formatDistanceDisplay(m.correctedDistance, units)}
@@ -216,7 +216,7 @@ export default function DeviceDetailPanel() {
         <button
           type="button"
           onClick={() => select(null)}
-          className="h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:text-zinc-100 dark:hover:bg-zinc-900"
+          className="h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:text-zinc-100 dark:hover:bg-zinc-900"
           aria-label="Close"
         >
           <X className="h-3.5 w-3.5" />
@@ -225,9 +225,9 @@ export default function DeviceDetailPanel() {
 
       <div className="flex-1 overflow-auto min-h-0">
         {loading && !detail ? (
-          <div className="p-6 text-sm text-zinc-500">Loading…</div>
+          <div className="p-6 text-sm text-zinc-500 dark:text-zinc-400">Loading…</div>
         ) : !detail ? (
-          <div className="p-6 text-sm text-zinc-500">
+          <div className="p-6 text-sm text-zinc-500 dark:text-zinc-400">
             Device not found in the current state. It may have aged out.
           </div>
         ) : (
@@ -282,7 +282,7 @@ export default function DeviceDetailPanel() {
                   )}
                 </div>
               ) : (
-                <div className="text-xs text-zinc-500">
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">
                   No position computed yet (need ≥2 fixes).
                 </div>
               )}
@@ -313,7 +313,7 @@ export default function DeviceDetailPanel() {
                       <span className="text-xs uppercase tracking-wide text-zinc-400">
                         Measurements
                       </span>
-                      <span className="text-xs text-zinc-500 truncate">
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
                         {total === 0
                           ? "no nodes"
                           : rejected > 0
@@ -334,7 +334,7 @@ export default function DeviceDetailPanel() {
               })()}
               {measurementsOpen && (
                 detail.measurements.length === 0 ? (
-                  <div className="px-4 py-3 text-xs text-zinc-500">
+                  <div className="px-4 py-3 text-xs text-zinc-500 dark:text-zinc-400">
                     No nodes reporting this device.
                   </div>
                 ) : (

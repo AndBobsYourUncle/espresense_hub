@@ -279,7 +279,7 @@ export default function SettingsClient() {
       {/* Header bar — file path + status + actions */}
       <div className="flex items-center gap-3 px-4 pb-3 border-b border-zinc-200 dark:border-zinc-800 text-xs">
         <FileText className="h-3.5 w-3.5 text-zinc-400" />
-        <span className="font-mono text-zinc-500 truncate">
+        <span className="font-mono text-zinc-500 dark:text-zinc-400 truncate">
           {configPath || "config.yaml"}
         </span>
         <span className="ml-auto flex items-center gap-3">
@@ -355,7 +355,7 @@ export default function SettingsClient() {
               className={`inline-flex items-center gap-1.5 h-9 px-3 text-xs font-medium border-b-2 -mb-px transition-colors ${
                 active
                   ? "border-blue-500 text-blue-600 dark:text-blue-400"
-                  : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+                  : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
               }`}
             >
               <Icon className="h-3.5 w-3.5" />
@@ -368,7 +368,7 @@ export default function SettingsClient() {
       {/* Tab content */}
       <div className="flex-1 min-h-0 overflow-auto">
         {status.kind === "loading" || !doc ? (
-          <div className="text-sm text-zinc-500 p-6">Loading config…</div>
+          <div className="text-sm text-zinc-500 dark:text-zinc-400 p-6">Loading config…</div>
         ) : tab === "general" ? (
           <GeneralTab doc={doc} setField={setField} />
         ) : tab === "mqtt" ? (
@@ -389,15 +389,17 @@ export default function SettingsClient() {
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-2 border-t border-zinc-200 dark:border-zinc-800 text-xs text-zinc-500 leading-relaxed">
-        Validated against the schema before writing. Atomic write — a partial
-        save can&apos;t corrupt the file. Comments and untouched fields are
-        preserved through structured edits. Most changes apply live; MQTT and
-        filtering settings need a service restart.{" "}
-        <kbd className="font-mono text-xs px-1 py-px rounded border border-zinc-300 dark:border-zinc-700">
-          ⌘/Ctrl+S
-        </kbd>{" "}
-        to save.
+      <div className="px-4 py-2 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3 text-xs text-zinc-600 dark:text-zinc-400">
+        <span className="truncate">
+          Atomic save with schema validation. Restart needed for MQTT and
+          filtering changes.
+        </span>
+        <span className="shrink-0 inline-flex items-center gap-1.5">
+          <kbd className="font-mono px-1.5 py-px rounded border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300">
+            ⌘/Ctrl+S
+          </kbd>
+          <span>to save</span>
+        </span>
       </div>
     </div>
   );
@@ -451,7 +453,7 @@ function Field({
           {label}
         </div>
         {hint && (
-          <div className="text-xs text-zinc-500 mt-0.5 leading-relaxed">
+          <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 leading-relaxed">
             {hint}
           </div>
         )}
@@ -476,7 +478,7 @@ function Section({
         {title}
       </h2>
       {description && (
-        <p className="text-xs text-zinc-500 mt-1 mb-2 leading-relaxed">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 mb-2 leading-relaxed">
           {description}
         </p>
       )}
@@ -539,7 +541,7 @@ function NumberInput({
         className="w-32 h-8 px-2.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-500"
       />
       {unit && (
-        <span className="text-xs text-zinc-500 font-mono">{unit}</span>
+        <span className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">{unit}</span>
       )}
     </div>
   );
@@ -1077,7 +1079,7 @@ function MiniField({
   return (
     <label className="block min-w-0">
       <span
-        className="block text-xs uppercase tracking-wider text-zinc-500 mb-0.5"
+        className="block text-xs uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-0.5"
         title={hint}
       >
         {label}
@@ -1090,7 +1092,7 @@ function MiniField({
 /** Empty-state message for a list with no entries. */
 function EmptyList({ message }: { message: string }) {
   return (
-    <div className="text-xs text-zinc-500 italic px-3 py-4 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-md">
+    <div className="text-xs text-zinc-500 dark:text-zinc-400 italic px-3 py-4 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-md">
       {message}
     </div>
   );
@@ -1251,7 +1253,7 @@ function NodesTab({ doc, setField, addToList, deleteAt }: DocListProps) {
                 label="Position"
                 hint="Edit on the map: click the node, then use the position editor"
               >
-                <span className="inline-block h-8 px-2.5 leading-8 rounded-md border border-dashed border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 text-xs font-mono text-zinc-500 max-w-md truncate">
+                <span className="inline-block h-8 px-2.5 leading-8 rounded-md border border-dashed border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 text-xs font-mono text-zinc-500 dark:text-zinc-400 max-w-md truncate">
                   {ptStr}
                 </span>
               </MiniField>
@@ -1375,7 +1377,7 @@ function RoomsTab({ doc, setField, addToList, deleteAt }: DocListProps) {
                       label={`Polygon (${ptCount} pts)`}
                       hint="Edit polygon vertices in the Advanced YAML tab"
                     >
-                      <span className="inline-block h-8 px-2.5 leading-8 rounded-md border border-dashed border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 text-xs font-mono text-zinc-500">
+                      <span className="inline-block h-8 px-2.5 leading-8 rounded-md border border-dashed border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 text-xs font-mono text-zinc-500 dark:text-zinc-400">
                         {ptCount} vertices
                       </span>
                     </MiniField>
@@ -1453,7 +1455,7 @@ function AdvancedTab({
         spellCheck={false}
         className="w-full h-full min-h-[400px] resize-none rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 p-3 font-mono text-xs leading-relaxed text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
       />
-      <p className="mt-2 text-xs text-zinc-500">
+      <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
         Raw YAML editor for fields not exposed in the structured tabs (floors,
         rooms, nodes, devices, locator weights, etc.). Validated on save.
       </p>

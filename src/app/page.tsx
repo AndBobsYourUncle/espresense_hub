@@ -123,7 +123,7 @@ export default async function MapPage() {
         <>
           <PageHeader title="Map" description={summary} />
           <main className="flex-1 min-h-0 p-6">
-            <div className="h-full rounded-xl border border-dashed border-zinc-300 dark:border-zinc-800 flex items-center justify-center text-sm text-zinc-500">
+            <div className="h-full rounded-xl border border-dashed border-zinc-300 dark:border-zinc-800 flex items-center justify-center text-sm text-zinc-500 dark:text-zinc-400">
               No floors defined in config.yaml
             </div>
           </main>

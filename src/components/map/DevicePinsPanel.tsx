@@ -124,7 +124,7 @@ export default function DevicePinsPanel({ deviceId }: Props) {
         <div className="text-xs uppercase tracking-wide text-zinc-400 mb-1">
           Pins
         </div>
-        <div className="text-xs text-zinc-500">
+        <div className="text-xs text-zinc-500 dark:text-zinc-400">
           No pins placed. Switch to the Pin tool and{" "}
           <strong>shift+click</strong> on the map where the device actually is
           to start building a learned RF map.
@@ -230,13 +230,13 @@ export default function DevicePinsPanel({ deviceId }: Props) {
                   </button>
                 </div>
               </div>
-              <div className="text-xs text-zinc-500 mb-1.5">
+              <div className="text-xs text-zinc-500 dark:text-zinc-400 mb-1.5">
                 {totalSamples} samples · {Object.keys(pin.nodeBias).length}{" "}
                 nodes
               </div>
               {Object.keys(pin.nodeBias).length > 0 && (
                 <details className="text-xs" onClick={(e) => e.stopPropagation()}>
-                  <summary className="cursor-pointer text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 select-none">
+                  <summary className="cursor-pointer text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 select-none">
                     per-node bias
                   </summary>
                   <div className="mt-1 space-y-0.5 font-mono">
@@ -254,7 +254,7 @@ export default function DevicePinsPanel({ deviceId }: Props) {
                             key={nodeId}
                             className="flex justify-between gap-2"
                           >
-                            <span className="text-zinc-500 truncate">
+                            <span className="text-zinc-500 dark:text-zinc-400 truncate">
                               {nodeId}
                             </span>
                             <span className="flex gap-2 text-zinc-400 shrink-0">

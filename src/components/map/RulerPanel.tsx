@@ -325,7 +325,7 @@ export default function RulerPanel({ nodes }: Props) {
     return (
       <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 space-y-1.5">
         <div className="flex items-baseline justify-between">
-          <span className="text-xs text-zinc-500">Map error</span>
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">Map error</span>
           <span
             className={`font-mono text-sm font-medium ${classifyError(errorPct).text}`}
           >
@@ -333,7 +333,7 @@ export default function RulerPanel({ nodes }: Props) {
           </span>
         </div>
         <div className="flex items-baseline justify-between">
-          <span className="text-xs text-zinc-500">Scale needed</span>
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">Scale needed</span>
           <span className="font-mono text-sm text-zinc-900 dark:text-zinc-100">
             × {scaleFactor.toFixed(3)}
           </span>
@@ -364,7 +364,7 @@ export default function RulerPanel({ nodes }: Props) {
         {...handlers}
         className="h-10 px-4 flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 shrink-0 cursor-grab active:cursor-grabbing select-none"
       >
-        <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-zinc-500 font-medium">
+        <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400 font-medium">
           <Ruler className="h-3.5 w-3.5" />
           Ruler
           {stats && (
@@ -376,7 +376,7 @@ export default function RulerPanel({ nodes }: Props) {
         <button
           type="button"
           onClick={clear}
-          className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:text-zinc-100 dark:hover:bg-zinc-900"
+          className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:text-zinc-100 dark:hover:bg-zinc-900"
           aria-label="Clear current selection"
           title="Clear current selection"
         >
@@ -392,7 +392,7 @@ export default function RulerPanel({ nodes }: Props) {
               <div className="text-sm text-zinc-700 dark:text-zinc-300 font-medium">
                 Click a wall on the map
               </div>
-              <p className="text-xs text-zinc-500 leading-relaxed">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
                 Every wall is highlighted. Pick the one you can easily measure
                 with a tape (typically an exterior wall or a long interior
                 wall).
@@ -415,7 +415,7 @@ export default function RulerPanel({ nodes }: Props) {
               {renderSaveButton()}
             </div>
           ) : !b ? (
-            <div className="text-sm text-zinc-500">
+            <div className="text-sm text-zinc-500 dark:text-zinc-400">
               Selected{" "}
               <span className="font-medium text-zinc-900 dark:text-zinc-100">
                 {a?.name ?? a?.id}
@@ -507,7 +507,7 @@ export default function RulerPanel({ nodes }: Props) {
                       <X className="h-3 w-3" />
                     </button>
                   </div>
-                  <div className="mt-0.5 flex items-baseline justify-between gap-2 text-xs font-mono text-zinc-500">
+                  <div className="mt-0.5 flex items-baseline justify-between gap-2 text-xs font-mono text-zinc-500 dark:text-zinc-400">
                     <span>
                       {formatDistanceDisplay(m.configDistance, units)} →{" "}
                       {formatDistanceDisplay(m.actualDistance, units)}
@@ -532,13 +532,13 @@ export default function RulerPanel({ nodes }: Props) {
               {stats.outlierIds.size > 0 && stats.trimmedCount > 0 ? (
                 <>
                   <div className="flex items-baseline justify-between">
-                    <span className="text-zinc-500">Trimmed mean</span>
+                    <span className="text-zinc-500 dark:text-zinc-400">Trimmed mean</span>
                     <span className="font-mono text-zinc-900 dark:text-zinc-100">
                       × {stats.trimmedMeanScale.toFixed(3)}
                     </span>
                   </div>
                   <div className="flex items-baseline justify-between">
-                    <span className="text-zinc-500">Trimmed range</span>
+                    <span className="text-zinc-500 dark:text-zinc-400">Trimmed range</span>
                     <span className="font-mono text-zinc-700 dark:text-zinc-300">
                       × {stats.trimmedMinScale.toFixed(3)} – ×{" "}
                       {stats.trimmedMaxScale.toFixed(3)}
@@ -554,13 +554,13 @@ export default function RulerPanel({ nodes }: Props) {
               ) : (
                 <>
                   <div className="flex items-baseline justify-between">
-                    <span className="text-zinc-500">Mean scale</span>
+                    <span className="text-zinc-500 dark:text-zinc-400">Mean scale</span>
                     <span className="font-mono text-zinc-900 dark:text-zinc-100">
                       × {stats.meanScale.toFixed(3)}
                     </span>
                   </div>
                   <div className="flex items-baseline justify-between">
-                    <span className="text-zinc-500">Range</span>
+                    <span className="text-zinc-500 dark:text-zinc-400">Range</span>
                     <span className="font-mono text-zinc-700 dark:text-zinc-300">
                       × {stats.minScale.toFixed(3)} – × {stats.maxScale.toFixed(3)}
                     </span>

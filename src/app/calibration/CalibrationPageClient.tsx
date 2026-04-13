@@ -277,7 +277,7 @@ export default function CalibrationPageClient() {
           </div>
 
           {rows.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-zinc-300 dark:border-zinc-800 p-8 text-center text-sm text-zinc-500">
+            <div className="rounded-xl border border-dashed border-zinc-300 dark:border-zinc-800 p-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
               No residual data yet. Stats accumulate as device measurements
               arrive — you need at least 3 nodes reporting on the same device
               for any sample to be recorded.
@@ -285,7 +285,7 @@ export default function CalibrationPageClient() {
           ) : (
             <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
               <table className="w-full text-sm">
-                <thead className="bg-zinc-50 dark:bg-zinc-900/50 text-xs uppercase tracking-wide text-zinc-500">
+                <thead className="bg-zinc-50 dark:bg-zinc-900/50 text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                   <tr>
                     <Th>Node</Th>
                     <Th>Settings</Th>
@@ -381,7 +381,7 @@ export default function CalibrationPageClient() {
                             units={units}
                           />
                         </Td>
-                        <Td className="text-right text-xs text-zinc-500">
+                        <Td className="text-right text-xs text-zinc-500 dark:text-zinc-400">
                           {formatRelative(n.lastUpdated)}
                         </Td>
                       </tr>
@@ -477,14 +477,14 @@ function AutofitModal({
           <button
             type="button"
             onClick={onClose}
-            className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:text-zinc-100 dark:hover:bg-zinc-900"
+            className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:text-zinc-100 dark:hover:bg-zinc-900"
           >
             <X className="h-4 w-4" />
           </button>
         </header>
 
         <div className="flex-1 overflow-auto">
-          <div className="px-4 py-3 text-xs text-zinc-500 leading-relaxed border-b border-zinc-200 dark:border-zinc-800">
+          <div className="px-4 py-3 text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed border-b border-zinc-200 dark:border-zinc-800">
             Closed-form per-node fit from ground-truth node-to-node samples.{" "}
             <span className="font-medium text-zinc-900 dark:text-zinc-100">
               {confidentCount}
@@ -502,7 +502,7 @@ function AutofitModal({
           </div>
 
           <table className="w-full text-xs">
-            <thead className="bg-zinc-50 dark:bg-zinc-900/50 text-zinc-500 uppercase tracking-wide">
+            <thead className="bg-zinc-50 dark:bg-zinc-900/50 text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
               <tr>
                 <th className="px-4 py-2 text-left font-medium">Node</th>
                 <th className="px-4 py-2 text-right font-medium">Current</th>
@@ -544,16 +544,16 @@ function AutofitModal({
                           ? "text-emerald-700 dark:text-emerald-400"
                           : delta < 0
                             ? "text-red-700 dark:text-red-400"
-                            : "text-zinc-500"
+                            : "text-zinc-500 dark:text-zinc-400"
                       }`}
                     >
                       {delta >= 0 ? "+" : ""}
                       {delta.toFixed(2)}
                     </td>
-                    <td className="px-4 py-2 text-right font-mono text-zinc-500">
+                    <td className="px-4 py-2 text-right font-mono text-zinc-500 dark:text-zinc-400">
                       ±{(p.iqr / 2).toFixed(2)}
                     </td>
-                    <td className="px-4 py-2 text-right font-mono text-zinc-500">
+                    <td className="px-4 py-2 text-right font-mono text-zinc-500 dark:text-zinc-400">
                       {p.validSamples.toLocaleString()}
                       {p.outliers > 0 && (
                         <span className="text-amber-500">
@@ -676,7 +676,7 @@ function AutoApplyStatus({
           <Activity className="h-3.5 w-3.5 text-emerald-500" />
           <span className="font-medium">Auto-apply</span>
           <span
-            className="inline-flex items-center gap-1 text-zinc-500"
+            className="inline-flex items-center gap-1 text-zinc-500 dark:text-zinc-400"
             title={`Cycle runs every ${intervalMin.toFixed(0)} minutes`}
           >
             <Timer className="h-3 w-3" />
@@ -692,7 +692,7 @@ function AutoApplyStatus({
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 text-zinc-500">
+        <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400">
           {lastEvent ? (
             <>
               <span>last action {lastAgo}</span>
@@ -715,7 +715,7 @@ function AutoApplyStatus({
           {/* Rate-limited nodes section — only shown if any are cooling. */}
           {rateLimited.length > 0 && (
             <section>
-              <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-zinc-500 mb-1.5">
+              <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
                 <Clock className="h-3 w-3" />
                 Rate-limited
                 <span className="normal-case tracking-normal text-zinc-400">
@@ -741,7 +741,7 @@ function AutoApplyStatus({
 
           {/* Recent events section. */}
           <section>
-            <div className="text-xs uppercase tracking-wider text-zinc-500 mb-1.5">
+            <div className="text-xs uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1.5">
               Recent pushes
               {events.length > 0 && (
                 <span className="normal-case tracking-normal text-zinc-400">
@@ -751,7 +751,7 @@ function AutoApplyStatus({
               )}
             </div>
             {events.length === 0 ? (
-              <div className="text-zinc-500 text-xs leading-relaxed">
+              <div className="text-zinc-500 dark:text-zinc-400 text-xs leading-relaxed">
                 No auto-apply events yet. The system pushes a calibration
                 update when a node&apos;s proposed absorption differs from
                 its current value by more than 0.05 (rate-limited to once
@@ -778,7 +778,7 @@ function AutoApplyStatus({
                       key={`${e.timestamp}-${e.nodeId}-${i}`}
                       className="border-t border-zinc-100 dark:border-zinc-800/50"
                     >
-                      <td className="py-1 text-zinc-500">
+                      <td className="py-1 text-zinc-500 dark:text-zinc-400">
                         {formatRelativeTime(audit.serverTime - e.timestamp)}
                       </td>
                       <td className="py-1 text-zinc-700 dark:text-zinc-200">
@@ -901,7 +901,7 @@ function PairBreakdown({
             const absDelta = Math.abs(delta);
             const deltaCls =
               absDelta < 0.2
-                ? "text-zinc-500"
+                ? "text-zinc-500 dark:text-zinc-400"
                 : absDelta < 0.5
                   ? "text-amber-600 dark:text-amber-400"
                   : "text-red-600 dark:text-red-400";
@@ -911,7 +911,7 @@ function PairBreakdown({
                 className="border-t border-zinc-100/60 dark:border-zinc-800/40"
               >
                 <td className="px-2 py-1 font-mono">{p.transmitterId}</td>
-                <td className="px-2 py-1 text-right font-mono text-zinc-500">
+                <td className="px-2 py-1 text-right font-mono text-zinc-500 dark:text-zinc-400">
                   {formatDistanceDisplay(p.meanTrueDist, units)}
                 </td>
                 <td className="px-2 py-1 text-right font-mono text-zinc-900 dark:text-zinc-100">
@@ -921,10 +921,10 @@ function PairBreakdown({
                   {delta >= 0 ? "+" : ""}
                   {delta.toFixed(2)}
                 </td>
-                <td className="px-2 py-1 text-right font-mono text-zinc-500">
+                <td className="px-2 py-1 text-right font-mono text-zinc-500 dark:text-zinc-400">
                   ±{(p.iqr / 2).toFixed(2)}
                 </td>
-                <td className="px-2 py-1 text-right font-mono text-zinc-500">
+                <td className="px-2 py-1 text-right font-mono text-zinc-500 dark:text-zinc-400">
                   {p.validSamples}
                 </td>
               </tr>
@@ -994,7 +994,7 @@ function SettingPill({
   }
   return (
     <span className="inline-flex items-baseline gap-1 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-900 text-xs font-mono">
-      <span className="uppercase tracking-wide text-zinc-500">{label}</span>
+      <span className="uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</span>
       <span className="text-zinc-900 dark:text-zinc-100">{value}</span>
     </span>
   );

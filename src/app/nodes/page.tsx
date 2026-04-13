@@ -105,13 +105,13 @@ export default async function NodesPage() {
         )}
 
         {rows.length === 0 ? (
-          <div className="h-full rounded-xl border border-dashed border-zinc-300 dark:border-zinc-800 flex items-center justify-center text-sm text-zinc-500">
+          <div className="h-full rounded-xl border border-dashed border-zinc-300 dark:border-zinc-800 flex items-center justify-center text-sm text-zinc-500 dark:text-zinc-400">
             No nodes configured or discovered yet
           </div>
         ) : (
           <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-zinc-50 dark:bg-zinc-900/50 text-xs uppercase tracking-wide text-zinc-500">
+              <thead className="bg-zinc-50 dark:bg-zinc-900/50 text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                 <tr>
                   <Th>Name</Th>
                   <Th>Status</Th>
@@ -137,7 +137,7 @@ export default async function NodesPage() {
                         <div className="font-medium text-zinc-900 dark:text-zinc-100">
                           {row.name}
                         </div>
-                        <div className="text-xs text-zinc-500 font-mono">
+                        <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
                           {row.id}
                           {!row.configured && (
                             <span className="ml-2 text-amber-600 dark:text-amber-500">
@@ -157,7 +157,7 @@ export default async function NodesPage() {
                             className={
                               online
                                 ? "text-emerald-700 dark:text-emerald-400"
-                                : "text-zinc-500"
+                                : "text-zinc-500 dark:text-zinc-400"
                             }
                           >
                             {online ? "online" : "offline"}
@@ -177,12 +177,12 @@ export default async function NodesPage() {
                       <Td className="text-right font-mono text-xs">
                         {t?.seen ?? "—"}
                       </Td>
-                      <Td className="text-right font-mono text-xs text-zinc-500">
+                      <Td className="text-right font-mono text-xs text-zinc-500 dark:text-zinc-400">
                         {row.point
                           ? `${row.point[0]}, ${row.point[1]}, ${row.point[2]}`
                           : "—"}
                       </Td>
-                      <Td className="text-right text-xs text-zinc-500">
+                      <Td className="text-right text-xs text-zinc-500 dark:text-zinc-400">
                         {formatRelative(row.state?.telemetryAt)}
                       </Td>
                     </tr>

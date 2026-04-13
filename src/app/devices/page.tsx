@@ -59,13 +59,13 @@ export default async function DevicesPage() {
       <PageHeader title="Devices" description={`${rows.length} tracked`} />
       <main className="flex-1 min-h-0 p-6 overflow-auto">
         {rows.length === 0 ? (
-          <div className="h-full rounded-xl border border-dashed border-zinc-300 dark:border-zinc-800 flex items-center justify-center text-sm text-zinc-500">
+          <div className="h-full rounded-xl border border-dashed border-zinc-300 dark:border-zinc-800 flex items-center justify-center text-sm text-zinc-500 dark:text-zinc-400">
             No devices discovered yet
           </div>
         ) : (
           <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-zinc-50 dark:bg-zinc-900/50 text-xs uppercase tracking-wide text-zinc-500">
+              <thead className="bg-zinc-50 dark:bg-zinc-900/50 text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
                 <tr>
                   <Th>Device</Th>
                   <Th className="text-right">Fixes</Th>
@@ -85,7 +85,7 @@ export default async function DevicesPage() {
                       <div className="font-medium text-zinc-900 dark:text-zinc-100">
                         {row.device.name ?? row.device.id}
                       </div>
-                      <div className="text-xs text-zinc-500 font-mono">
+                      <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
                         {row.device.id}
                       </div>
                     </Td>
@@ -105,7 +105,7 @@ export default async function DevicesPage() {
                         ? `${row.strongestRssi} dBm`
                         : "—"}
                     </Td>
-                    <Td className="text-right text-xs text-zinc-500">
+                    <Td className="text-right text-xs text-zinc-500 dark:text-zinc-400">
                       {formatRelative(row.device.lastSeen)}
                     </Td>
                   </tr>

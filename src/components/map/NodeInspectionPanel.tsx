@@ -68,7 +68,7 @@ function InfoRow({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <span className="text-zinc-500">{label}</span>
+      <span className="text-zinc-500 dark:text-zinc-400">{label}</span>
       <span
         className={`font-mono ${valueClass ?? "text-zinc-900 dark:text-zinc-100"}`}
       >
@@ -122,7 +122,7 @@ export default function NodeInspectionPanel({ nodes }: Props) {
               startEditing(inspectedNodeId, node.point);
             }}
             title="Edit node position"
-            className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:text-zinc-100 dark:hover:bg-zinc-900"
+            className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:text-zinc-100 dark:hover:bg-zinc-900"
           >
             <Edit3 className="h-3.5 w-3.5" />
           </button>
@@ -130,7 +130,7 @@ export default function NodeInspectionPanel({ nodes }: Props) {
             type="button"
             onClick={() => setInspectedNodeId(null)}
             title="Close"
-            className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:text-zinc-100 dark:hover:bg-zinc-900"
+            className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:text-zinc-100 dark:hover:bg-zinc-900"
           >
             <X className="h-3.5 w-3.5" />
           </button>
