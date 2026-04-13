@@ -165,23 +165,37 @@ export default function Sidebar() {
             status?.mqtt.error ?? status?.mqtt.host ?? undefined
           }
         >
-          <div className={`flex items-center gap-2 ${style.text}`}>
+          {/* Mobile-landscape compact: dot + count on a single row.
+              The "MQTT [Connected]" label is implicit (the colored
+              dot conveys it) and the host detail is in the tooltip. */}
+          <div className="hidden max-lg:landscape:flex items-center gap-2">
             <span className={`h-2 w-2 rounded-full shrink-0 ${style.dot}`} />
-            <span className="font-medium">MQTT {style.label}</span>
+            {status && (
+              <span className="text-zinc-500 dark:text-zinc-400">
+                {status.nodeCount} nodes · {status.deviceCount} devices
+              </span>
+            )}
           </div>
-          {detail && (
-            // Hide the IP/host line in mobile landscape — sidebar
-            // height is at a premium there. Tooltip on the parent
-            // still surfaces it.
-            <div className="pl-4 text-zinc-400 dark:text-zinc-500 font-mono truncate max-lg:landscape:hidden">
-              {detail}
+
+          {/* Default view: full status text + host + count. */}
+          <div className="max-lg:landscape:hidden space-y-1">
+            <div className={`flex items-center gap-2 ${style.text}`}>
+              <span
+                className={`h-2 w-2 rounded-full shrink-0 ${style.dot}`}
+              />
+              <span className="font-medium">MQTT {style.label}</span>
             </div>
-          )}
-          {status && (
-            <div className="pl-4 text-zinc-400 dark:text-zinc-500">
-              {status.nodeCount} nodes · {status.deviceCount} devices
-            </div>
-          )}
+            {detail && (
+              <div className="pl-4 text-zinc-400 dark:text-zinc-500 font-mono truncate">
+                {detail}
+              </div>
+            )}
+            {status && (
+              <div className="pl-4 text-zinc-400 dark:text-zinc-500">
+                {status.nodeCount} nodes · {status.deviceCount} devices
+              </div>
+            )}
+          </div>
         </div>
         <div className="px-3 flex items-center justify-between gap-2">
           <span className="text-xs uppercase tracking-wide text-zinc-400">
