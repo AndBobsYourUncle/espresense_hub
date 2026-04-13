@@ -25,35 +25,21 @@ const GROUP_COLORS = [
   "#fb7185", // rose-400
 ];
 
-// ─── Convex hull (Andrew's monotone chain) ────────────────────────────────────
+// ─── Point-in-polygon (ray casting) ─────────────────────────────────────────
 
-function cross(
-  O: readonly [number, number],
-  A: readonly [number, number],
-  B: readonly [number, number],
-): number {
-  return (A[0] - O[0]) * (B[1] - O[1]) - (A[1] - O[1]) * (B[0] - O[0]);
-}
-
-function convexHull(points: readonly (readonly [number, number])[]): [number, number][] {
-  if (points.length < 3) return points.map((p) => [p[0], p[1]]);
-  const pts = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]) as [number, number][];
-  const lower: [number, number][] = [];
-  for (const p of pts) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0)
-      lower.pop();
-    lower.push(p);
+function pointInPolygon(
+  px: number,
+  py: number,
+  poly: readonly (readonly number[])[],
+): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1];
+    const xj = poly[j][0], yj = poly[j][1];
+    if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi)
+      inside = !inside;
   }
-  const upper: [number, number][] = [];
-  for (let i = pts.length - 1; i >= 0; i--) {
-    const p = pts[i];
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0)
-      upper.pop();
-    upper.push(p);
-  }
-  lower.pop();
-  upper.pop();
-  return [...lower, ...upper];
+  return inside;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -98,21 +84,41 @@ export default function RoomOverlay({ floor, transform }: Props) {
     return m;
   }, [floor.rooms]);
 
-  // Convex hull per floor_area group, in SVG coordinates.
-  const groupHulls = useMemo(() => {
-    const groups = new Map<string, [number, number][]>();
+  // Outer boundary edges per floor_area group — edges whose midpoint does not
+  // lie inside any sibling room (i.e. they face outward).
+  const groupOuterEdges = useMemo(() => {
+    const groupRooms = new Map<string, typeof floor.rooms>();
     for (const room of floor.rooms) {
-      if (!room.floor_area || !room.points) continue;
-      const pts = groups.get(room.floor_area) ?? [];
-      for (const p of room.points) pts.push([p[0], p[1]]);
-      groups.set(room.floor_area, pts);
+      if (!room.floor_area || !room.points || room.points.length < 3) continue;
+      const arr = groupRooms.get(room.floor_area) ?? [];
+      arr.push(room);
+      groupRooms.set(room.floor_area, arr);
     }
-    return [...groups.entries()].map(([tag, pts]) => {
-      const hull = convexHull(pts);
-      const svgPts = hull
-        .map(([x, y]) => `${tx(transform, x)},${ty(transform, y)}`)
-        .join(" ");
-      return { tag, svgPts, color: groupColorMap.get(tag) ?? GROUP_COLORS[0] };
+
+    return [...groupRooms.entries()].map(([tag, rooms]) => {
+      const edges: { x1: number; y1: number; x2: number; y2: number }[] = [];
+      for (const room of rooms) {
+        const pts = room.points!;
+        for (let i = 0; i < pts.length; i++) {
+          const a = pts[i];
+          const b = pts[(i + 1) % pts.length];
+          const mx = (a[0] + b[0]) / 2;
+          const my = (a[1] + b[1]) / 2;
+          // If the midpoint falls inside any sibling room, this is an interior edge.
+          const interior = rooms.some(
+            (other) => other !== room && other.points != null && pointInPolygon(mx, my, other.points),
+          );
+          if (!interior) {
+            edges.push({
+              x1: tx(transform, a[0]),
+              y1: ty(transform, a[1]),
+              x2: tx(transform, b[0]),
+              y2: ty(transform, b[1]),
+            });
+          }
+        }
+      }
+      return { tag, color: groupColorMap.get(tag) ?? GROUP_COLORS[0], edges };
     });
   }, [floor.rooms, groupColorMap, transform]);
 
@@ -150,23 +156,25 @@ export default function RoomOverlay({ floor, transform }: Props) {
 
       <g className="room-overlay" style={{ cursor: isRelationsMode || isZonesMode ? "pointer" : "default" }}>
 
-        {/* ── Floor-area group hulls (relations mode only) ─────────────────── */}
+        {/* ── Floor-area group outer edges (relations mode only) ───────────── */}
         {isRelationsMode && (
           <g style={{ pointerEvents: "none" }}>
-            {groupHulls.map(({ tag, svgPts, color }) => {
+            {groupOuterEdges.map(({ tag, color, edges }) => {
               const isActiveGroup = activeDraftGroup !== "" && tag === activeDraftGroup;
-              return (
-                <polygon
-                  key={`hull-${tag}`}
-                  points={svgPts}
-                  fill={isActiveGroup ? color : "none"}
-                  fillOpacity={isActiveGroup ? 0.12 : 0}
+              return edges.map(({ x1, y1, x2, y2 }, i) => (
+                <line
+                  key={`outer-${tag}-${i}`}
+                  x1={x1}
+                  y1={y1}
+                  x2={x2}
+                  y2={y2}
                   stroke={color}
                   strokeWidth={0.07}
                   strokeDasharray="0.18 0.1"
-                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  opacity={isActiveGroup ? 1 : 0.6}
                 />
-              );
+              ));
             })}
           </g>
         )}
