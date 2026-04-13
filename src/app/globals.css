@@ -84,6 +84,12 @@ body {
   transition: transform 600ms cubic-bezier(0.4, 0, 0.2, 1);
   animation: fp-device-in 250ms ease-out;
 }
+/* Suppress the slide on tab-refocus catch-up — the marker would
+   otherwise visibly slide across however far the device "moved" while
+   the tab was hidden. We just snap to the fresh position instead. */
+.fp-device[data-snapping] {
+  transition: none;
+}
 @keyframes fp-device-in {
   from {
     opacity: 0;

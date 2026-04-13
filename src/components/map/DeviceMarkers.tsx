@@ -19,12 +19,28 @@ interface Props {
   pollMs?: number;
 }
 
-function useDevicePositions(pollMs: number): DevicePositionDTO[] {
+/**
+ * Returns the latest device positions plus a `snapping` flag that's
+ * true for one render whenever the tab just regained visibility.
+ *
+ * The flag is consumed by the marker's `data-snapping` attribute, which
+ * pairs with a CSS rule that suppresses the normal transform transition
+ * for that one frame. Without it, refocusing the tab after it's been
+ * hidden for a while produces a long visible slide across the map as
+ * the marker animates from its stale position to the freshly-fetched
+ * one — distracting because the device didn't actually move smoothly,
+ * we just missed seeing it move.
+ */
+function useDevicePositions(pollMs: number): {
+  devices: DevicePositionDTO[];
+  snapping: boolean;
+} {
   const [devices, setDevices] = useState<DevicePositionDTO[]>([]);
+  const [snapping, setSnapping] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    const tick = async () => {
+    const fetchOnce = async () => {
       try {
         const res = await fetch("/api/devices/positions", {
           cache: "no-store",
@@ -36,15 +52,32 @@ function useDevicePositions(pollMs: number): DevicePositionDTO[] {
         // swallow — next tick will retry
       }
     };
-    tick();
-    const id = setInterval(tick, pollMs);
+
+    fetchOnce();
+    const id = setInterval(fetchOnce, pollMs);
+
+    // Tab refocus: refetch immediately AND set the snapping flag so the
+    // catch-up render doesn't animate. A double rAF re-enables the
+    // transition after the new transform has been committed to the DOM,
+    // so subsequent updates get the normal smooth slide.
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      setSnapping(true);
+      fetchOnce();
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => setSnapping(false));
+      });
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
       cancelled = true;
       clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [pollMs]);
 
-  return devices;
+  return { devices, snapping };
 }
 
 export default function DeviceMarkers({
@@ -52,7 +85,7 @@ export default function DeviceMarkers({
   staleAfterMs,
   pollMs = 1000,
 }: Props) {
-  const devices = useDevicePositions(pollMs);
+  const { devices, snapping } = useDevicePositions(pollMs);
   const { selectedId, select } = useDeviceSelection();
   const { compareMode, setInspectedNodeId } = useMapTool();
   const now = Date.now();
@@ -115,6 +148,7 @@ export default function DeviceMarkers({
           <g
             key={d.id}
             className={`fp-device${isSelected ? " fp-device-selected" : ""}`}
+            data-snapping={snapping ? "" : undefined}
             transform={`translate(${sx} ${sy})`}
             onClick={(e) => {
               e.stopPropagation();
