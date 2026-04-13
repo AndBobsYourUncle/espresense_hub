@@ -19,7 +19,7 @@ const MARKER_ID = "room-conn-arrow";
 // Door arrow geometry (metres): shaft starts this far inside the editing room
 // and ends this far into the connected room, perpendicular to the wall.
 const DOOR_INSIDE  = 0.28;
-const DOOR_OUTSIDE = 0.12;
+const DOOR_OUTSIDE = 0.38;
 
 /**
  * Return the outward unit normal of the edge of `points` that is nearest to
