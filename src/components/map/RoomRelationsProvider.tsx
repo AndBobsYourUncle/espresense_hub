@@ -131,13 +131,19 @@ export default function RoomRelationsProvider({
     }
 
     // Find rooms that list this room in THEIR open_to (reverse references).
+    // Also pull in any door position stored on their side.
     const reverseRefs: string[] = [];
     for (const r of allRooms) {
       if (!r.id || r.id === id) continue;
-      const hasRef = (r.open_to ?? []).some(
-        (entry) => resolveRoomId(openToId(entry), allRooms) === id,
-      );
-      if (hasRef) reverseRefs.push(r.id);
+      for (const entry of r.open_to ?? []) {
+        if (resolveRoomId(openToId(entry), allRooms) !== id) continue;
+        reverseRefs.push(r.id);
+        // Mirror the door position if the other room stored it and we don't
+        // already have one from our own open_to.
+        const door = openToDoor(entry);
+        if (door && !doors[r.id]) doors[r.id] = door;
+        break;
+      }
     }
 
     // Effective connection set = own + reverse (deduplicated).
