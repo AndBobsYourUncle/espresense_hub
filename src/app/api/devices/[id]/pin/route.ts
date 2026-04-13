@@ -7,7 +7,7 @@ import {
   deactivatePin,
   deleteDevicePin,
   getDevicePins,
-  getMostRecentPin,
+  getCalibrationPin,
   recordDevicePin,
 } from "@/lib/calibration/device_cal";
 import { publishDeviceConfig } from "@/lib/mqtt/client";
@@ -89,8 +89,12 @@ export async function GET(
   const store = getStore();
 
   const pins = getDevicePins(store, deviceId);
-  const mostRecent = getMostRecentPin(store, deviceId);
-  const result = mostRecent ? computeRefRssiFromPin(mostRecent, store) : null;
+  // Prefer the active pin (live ground truth + accumulating samples);
+  // fall back to the most-recently-placed pin if nothing is active.
+  const calibrationPin = getCalibrationPin(store, deviceId);
+  const result = calibrationPin
+    ? computeRefRssiFromPin(calibrationPin, store)
+    : null;
 
   const response: PinListResponse = {
     pins: pins.map(pinToDTO),
@@ -166,7 +170,7 @@ export async function PUT(
   const deviceId = decodeURIComponent(rawId);
   const store = getStore();
 
-  const pin = getMostRecentPin(store, deviceId);
+  const pin = getCalibrationPin(store, deviceId);
   if (!pin) {
     return NextResponse.json(
       { error: "no pin placed for this device" },

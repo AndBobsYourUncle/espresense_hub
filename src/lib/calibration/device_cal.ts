@@ -286,9 +286,22 @@ export function clearDevicePins(store: Store, deviceId: string): void {
 }
 
 /**
+ * Minimum sample count to prefer the streaming bias mean over the
+ * single-snapshot `pin.measurements`. Same threshold the locator-side
+ * `biasFromPin` uses, for consistency.
+ */
+const MIN_BIAS_SAMPLES = 5;
+
+/**
  * From a pin, compute the per-node rssi@1m adjustment needed so the
  * firmware's distance formula outputs the correct value for this
  * device.
+ *
+ * Per-node ratio = measured/true. We prefer the streaming average
+ * (`pin.nodeBias[nodeId]` accumulated while the pin is active) when
+ * we have ≥5 samples — far more robust than the single-snapshot
+ * value captured at pin placement. Falls back to the snapshot when
+ * the accumulator hasn't seen enough samples for that node yet.
  *
  * Math: the firmware computes `d = 10^((refRssi - rssi) / (10 × n))`.
  * If `d_measured / d_true = C`, adjusting refRssi by `−10 × n × log₁₀(C)`
@@ -306,7 +319,13 @@ export function computeRefRssiFromPin(
 ): { refRssi: number; deltas: Array<{ nodeId: string; delta: number; ratio: number }> } | null {
   const deltas: Array<{ nodeId: string; delta: number; ratio: number }> = [];
 
-  for (const [nodeId, measured] of pin.measurements) {
+  // Walk every node we have either snapshot OR streaming data for.
+  const nodeIds = new Set<string>([
+    ...pin.measurements.keys(),
+    ...pin.nodeBias.keys(),
+  ]);
+
+  for (const nodeId of nodeIds) {
     const nodePoint = store.nodeIndex.get(nodeId);
     if (!nodePoint) continue;
     const dx = pin.position[0] - nodePoint[0];
@@ -314,9 +333,21 @@ export function computeRefRssiFromPin(
     const dz = pin.position[2] - nodePoint[2];
     const trueDist = Math.sqrt(dx * dx + dy * dy + dz * dz);
     if (trueDist < MIN_TRUE_DIST) continue;
-    if (measured <= 0) continue;
 
-    const ratio = measured / trueDist;
+    // Prefer the streaming mean; fall back to the snapshot.
+    let ratio: number | null = null;
+    const accumulated = pin.nodeBias.get(nodeId);
+    if (accumulated && accumulated.sampleCount >= MIN_BIAS_SAMPLES) {
+      const meanBias = accumulated.sumBias / accumulated.sampleCount;
+      if (Number.isFinite(meanBias) && meanBias > 0) {
+        ratio = meanBias;
+      }
+    }
+    if (ratio === null) {
+      const measured = pin.measurements.get(nodeId);
+      if (measured == null || measured <= 0) continue;
+      ratio = measured / trueDist;
+    }
     if (!Number.isFinite(ratio) || ratio <= 0) continue;
 
     // Node's absorption (n). Fall back to 2.7 if not set.
@@ -364,4 +395,17 @@ export function getMostRecentPin(
   return pins.reduce((newest, p) =>
     p.timestamp > newest.timestamp ? p : newest,
   );
+}
+
+/**
+ * Return the best pin to drive the rssi@1m calibration: the active
+ * pin if there is one (current ground truth, samples are accumulating
+ * right now), otherwise the most-recently-placed pin (last known
+ * truth, frozen at its placement-time snapshot).
+ */
+export function getCalibrationPin(
+  store: Store,
+  deviceId: string,
+): DeviceGroundTruthPin | null {
+  return getActivePin(store, deviceId) ?? getMostRecentPin(store, deviceId);
 }

@@ -37,8 +37,17 @@ export default function NodeMarkers({ nodes, transform }: Props) {
   const { activeTool, inspectedNodeId, setInspectedNodeId } = useMapTool();
   const { select: selectDevice } = useDeviceSelection();
 
+  // In pin mode, node markers shouldn't intercept pointer events.
+  // Clicks/drags need to pass through to the pin overlay underneath
+  // — otherwise dragging a pin over a node label or even close to a
+  // node circle gets caught by the node marker and the drop position
+  // ends up wrong (or the drop fails entirely). Inspect/ruler tools
+  // need clicks on nodes to work, so we only disable pointer events
+  // for the pin tool.
+  const isPinMode = activeTool === "pin";
+
   return (
-    <g>
+    <g style={isPinMode ? { pointerEvents: "none" } : undefined}>
       {nodes.map((n, i) => {
         // While editing, override the position with the live draft so the
         // marker moves as the user types in the panel.
