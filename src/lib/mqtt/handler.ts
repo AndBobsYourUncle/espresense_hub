@@ -16,30 +16,61 @@ import {
   recordNodeSetting,
 } from "@/lib/state/store";
 
-/** Mean per-node distance-variance threshold for considering a device
- *  stationary. Below this, samples are added to the active pin's
- *  bias accumulator. */
-const STATIONARY_VARIANCE_THRESHOLD = 0.5;
+/**
+ * Speed (m/s) below which the Kalman filter's velocity estimate is
+ * considered "stationary". The filter typically reads ~0.02–0.05 m/s
+ * for a truly motionless device and 0.5+ m/s for a walking person,
+ * so 0.15 m/s is well inside the safe gap.
+ */
+const STATIONARY_SPEED_THRESHOLD = 0.15;
+
+/**
+ * Fallback per-node distance-variance threshold (m²), used only when
+ * Kalman state isn't available yet (first few seconds after the
+ * device shows up). 3.0 m² ≈ 1.7 m std dev — generous enough to
+ * tolerate body-shadow micro-jitter from a stationary worn wearable
+ * but small enough to catch actual walking.
+ */
+const STATIONARY_VARIANCE_THRESHOLD = 3.0;
 
 /**
  * Decide whether the device is currently stationary near its active
- * pin (if any). Uses the per-node distance variance we already track
- * — when the device sits still, RSSI fluctuates only by sensor noise
- * and the EMA's variance stays low. Motion makes the variance spike.
+ * pin (if any). Two signals, in priority order:
+ *
+ *   1. **Kalman velocity** — the filtered velocity component is the
+ *      cleanest signal we have. If |v| < threshold, the device isn't
+ *      moving regardless of how noisy individual node distances look.
+ *      RSSI variance from body-shadow micro-movements doesn't fool it.
+ *   2. **Per-node distance variance** — fallback for the brief window
+ *      after a device first appears, before the Kalman has converged.
+ *      Uses a generous threshold (3.0 m²) since stationary worn
+ *      wearables routinely generate 1–2 m of distance jitter per node
+ *      that has nothing to do with motion.
  */
 function isDeviceStationary(
-  measurements: Iterable<{ distanceVariance?: number; lastSeen: number }>,
+  device: { kalman?: { x: number[] }; measurements: Map<string, { distanceVariance?: number; lastSeen: number }> },
   cutoffMs: number,
 ): boolean {
+  // Primary: Kalman speed. State [x, y, z, vx, vy, vz] — speed is the
+  // 3D magnitude of the velocity components.
+  if (device.kalman?.x && device.kalman.x.length >= 6) {
+    const vx = device.kalman.x[3];
+    const vy = device.kalman.x[4];
+    const vz = device.kalman.x[5];
+    const speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
+    return speed < STATIONARY_SPEED_THRESHOLD;
+  }
+
+  // Fallback: variance, with a more lenient threshold than before.
   let count = 0;
   let sumVar = 0;
-  for (const m of measurements) {
+  for (const m of device.measurements.values()) {
     if (m.lastSeen < cutoffMs) continue;
     if (m.distanceVariance == null) continue;
     sumVar += m.distanceVariance;
     count += 1;
   }
-  if (count < 3) return false; // not enough data to decide
+  if (count < 3) return false;
   const meanVar = sumVar / count;
   return meanVar < STATIONARY_VARIANCE_THRESHOLD;
 }
@@ -245,7 +276,7 @@ export function attachHandlers(client: MqttClient, config: Config): void {
       const activePin = getActivePin(store, device.id);
       if (activePin && normalized.distance != null) {
         const cutoff = Date.now() - staleAfterMs;
-        if (isDeviceStationary(device.measurements.values(), cutoff)) {
+        if (isDeviceStationary(device, cutoff)) {
           accumulatePinSample(
             store,
             activePin,

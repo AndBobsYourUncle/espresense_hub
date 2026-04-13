@@ -28,14 +28,34 @@ import type { DevicePosition } from "./store";
  * compare mode still show each base locator's true per-message jitter.
  */
 
-/** Time constant for the EMA, in seconds. Shorter = more responsive but jittery. */
-const TAU_SECONDS = 1.0;
+/**
+ * Time constant for the EMA, in seconds. Set at bootstrap from
+ * `filtering.smoothing_weight` in config.yaml — see `setPositionSmoothingWeight`.
+ * Shorter = more responsive but jittery.
+ */
+let TAU_SECONDS = 0.5;
 
 /** Minimum alpha per update so same-ms bursts still advance. */
 const MIN_ALPHA = 0.02;
 
 /** Past this gap, treat the prior as stale and accept the raw value. */
 const MAX_GAP_MS = 30_000;
+
+/**
+ * Tune the output-side position smoothing time constant from the same
+ * 0..1 weight used for measurement smoothing. Output τ is shorter than
+ * input τ because input smoothing already absorbed most of the noise —
+ * this layer just polishes the residual jitter.
+ *
+ *   weight 0.0 → τ = 0.0 s   (no smoothing)
+ *   weight 0.4 → τ = 0.5 s   (current default — fast follow)
+ *   weight 0.7 → τ = 1.0 s   (upstream default — heavy smoothing)
+ *   weight 1.0 → τ = 2.0 s   (very heavy)
+ */
+export function setPositionSmoothingWeight(weight: number): void {
+  const w = Math.max(0, Math.min(1, weight));
+  TAU_SECONDS = w * 2;
+}
 
 export function smoothDevicePosition(
   prev: DevicePosition | undefined,
@@ -45,6 +65,9 @@ export function smoothDevicePosition(
 
   const dtMs = Math.max(0, next.computedAt - prev.computedAt);
   if (dtMs >= MAX_GAP_MS) return next;
+
+  // τ = 0 means smoothing disabled — accept the raw position outright.
+  if (TAU_SECONDS <= 0) return next;
 
   const dtSec = dtMs / 1000;
   const timeAlpha = 1 - Math.exp(-dtSec / TAU_SECONDS);

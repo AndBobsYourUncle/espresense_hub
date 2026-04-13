@@ -94,7 +94,11 @@ export function recordDevicePin(
 }
 
 /** Mark a specific pin as active for accumulation. Deactivates any
- *  other active pin for the same device. */
+ *  other active pin for the same device. Also resets the device's
+ *  Kalman velocity to zero — clicking "activate" is the user
+ *  asserting "I am stationary at this spot right now", so any prior
+ *  velocity estimate (e.g. from walking up to drop the pin) would
+ *  otherwise trigger the motion detector and immediately deactivate. */
 export function activatePin(
   store: Store,
   deviceId: string,
@@ -112,6 +116,17 @@ export function activatePin(
       p.activeUntilMs = 0;
     }
   }
+
+  // Zero the Kalman velocity for this device (if state exists).
+  // Position is left untouched — the locator already knows where it
+  // thinks the device is; we're just stating the velocity is ~0.
+  const device = store.devices.get(deviceId);
+  if (device?.kalman?.x && device.kalman.x.length >= 6) {
+    device.kalman.x[3] = 0;
+    device.kalman.x[4] = 0;
+    device.kalman.x[5] = 0;
+  }
+
   return target;
 }
 

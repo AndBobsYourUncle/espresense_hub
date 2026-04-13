@@ -14,7 +14,13 @@ import { loadConfig, ConfigNotFoundError } from "@/lib/config";
 import { connectMqtt } from "@/lib/mqtt/client";
 import { attachHandlers } from "@/lib/mqtt/handler";
 import { loadDevicePins, saveDevicePins } from "@/lib/state/device_persistence";
-import { getStore } from "@/lib/state/store";
+import {
+  setKalmanMeasurementNoise,
+  setKalmanProcessNoise,
+} from "@/lib/state/kalman";
+import { setMeasurementSmoothingWeight } from "@/lib/state/measurement_smoothing";
+import { setPositionSmoothingWeight } from "@/lib/state/smoothing";
+import { getStore, setPositionFilter } from "@/lib/state/store";
 
 /**
  * Per-pair fits now update *online* — each ground-truth sample
@@ -62,6 +68,22 @@ export async function bootstrap(): Promise<void> {
     for (const n of config.nodes) {
       if (n.id && n.point) store.nodeIndex.set(n.id, n.point);
     }
+
+    // Apply the user's filtering config. The input-side measurement
+    // smoothing always runs (averages RSSI noise per node before
+    // solving) and uses smoothing_weight regardless of which output
+    // filter is active. The output-side filter is selectable.
+    setMeasurementSmoothingWeight(config.filtering.smoothing_weight);
+    setPositionSmoothingWeight(config.filtering.smoothing_weight);
+    setPositionFilter(config.filtering.position_filter);
+    setKalmanProcessNoise(config.filtering.kalman_process_noise);
+    setKalmanMeasurementNoise(config.filtering.kalman_measurement_noise);
+    console.log(
+      `[bootstrap] filter=${config.filtering.position_filter} ` +
+        `kalman_process_noise=${config.filtering.kalman_process_noise} ` +
+        `kalman_measurement_noise=${config.filtering.kalman_measurement_noise} ` +
+        `smoothing_weight=${config.filtering.smoothing_weight}`,
+    );
 
     // Load persisted state from disk before MQTT starts pushing
     // messages — calibration restored, device biases ready, system

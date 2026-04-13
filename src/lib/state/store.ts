@@ -3,8 +3,20 @@ import type {
   NodeTelemetry,
   NormalizedMeasurement,
 } from "@/lib/mqtt/messages";
+import { kalmanStep } from "./kalman";
 import { smoothMeasurementDistance } from "./measurement_smoothing";
 import { smoothDevicePosition } from "./smoothing";
+
+/**
+ * Active position filter, set at bootstrap from `filtering.position_filter`
+ * in config.yaml. Defaults to `kalman` — see `setPositionFilter`.
+ */
+export type PositionFilter = "kalman" | "ema" | "none";
+let positionFilter: PositionFilter = "kalman";
+
+export function setPositionFilter(mode: PositionFilter): void {
+  positionFilter = mode;
+}
 
 /**
  * In-memory runtime state for the hub.
@@ -75,6 +87,12 @@ export interface DeviceState {
   measurements: Map<string, DeviceMeasurement>;
   /** Most recent locator output for this device. */
   position?: DevicePosition;
+  /**
+   * Per-device Kalman filter state. Holds [x, y, z, vx, vy, vz] plus a
+   * 6×6 covariance matrix. Only populated when `filtering.position_filter`
+   * is `kalman` (the default). EMA mode leaves this undefined.
+   */
+  kalman?: import("./kalman").KalmanState;
 }
 
 export interface MqttConnectionState {
@@ -330,12 +348,37 @@ export class Store {
     if (!d) return;
     if (!position) {
       d.position = undefined;
+      d.kalman = undefined;
       return;
     }
-    // Blend the new raw solution with the previously-stored smoothed
-    // position. The alternatives array is passed through unchanged so
-    // the compare-mode ghost markers still show raw per-algorithm output.
-    d.position = smoothDevicePosition(d.position, position);
+    // Apply the active position filter. Kalman filter is the default —
+    // tracks position AND velocity so motion is followed without lag,
+    // while stationary devices still benefit from measurement noise
+    // averaging. EMA is kept available as a fallback / A-B comparison
+    // via `filtering.position_filter: ema` in config.yaml.
+    // The alternatives array is passed through unchanged either way so
+    // compare-mode ghost markers still show raw per-algorithm output.
+    if (positionFilter === "kalman") {
+      const next = kalmanStep(
+        d.kalman,
+        [position.x, position.y, position.z],
+        position.confidence,
+        position.computedAt,
+      );
+      d.kalman = next;
+      d.position = {
+        ...position,
+        x: next.x[0],
+        y: next.x[1],
+        z: next.x[2],
+      };
+    } else if (positionFilter === "ema") {
+      d.position = smoothDevicePosition(d.position, position);
+    } else {
+      // "none" — pass raw locator output straight through. Useful for
+      // diagnosing whether smoothing is responsible for an artifact.
+      d.position = position;
+    }
   }
 
   setMqttStatus(next: Partial<MqttConnectionState>): void {

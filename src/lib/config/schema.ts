@@ -111,10 +111,53 @@ export const LocatorsSchema = z
 
 export const FilteringSchema = z
   .object({
+    /**
+     * Which position filter to apply. Default `kalman` — tracks
+     * position AND velocity so motion is followed without lag while
+     * stationary devices still benefit from measurement averaging.
+     * `ema` falls back to a simple time-weighted exponential moving
+     * average. `none` passes raw locator output through unfiltered
+     * (useful for diagnosing what the smoothing is doing).
+     */
+    position_filter: z.enum(["kalman", "ema", "none"]).default("kalman"),
+    /**
+     * Kalman process noise — std dev of acceleration in m/s². Higher
+     * = more responsive to direction changes, jitter creeps back in.
+     * 0.5 is reasonable for a human walking; 1.5+ for a phone being
+     * waved around. Only applies when position_filter = kalman.
+     *
+     * Note: distinct from upstream companion's `process_noise` field
+     * (which has different semantics — variance, not std dev).
+     */
+    kalman_process_noise: z.number().default(0.5),
+    /**
+     * Kalman measurement noise — base std dev of locator output
+     * position error, in meters. Scaled per-update by 1/confidence
+     * so low-confidence fixes get less weight automatically. 0.5 m
+     * works well with our locator stack. Only applies when
+     * position_filter = kalman.
+     *
+     * Note: distinct from upstream companion's `measurement_noise`.
+     */
+    kalman_measurement_noise: z.number().default(0.5),
+    /**
+     * Upstream-companion fields, parsed for back-compat but currently
+     * unused by our pipeline. The companion's Kalman has different
+     * semantics from ours — see kalman_process_noise above. Safe to
+     * leave in your config; the locator will just ignore them.
+     */
     process_noise: z.number().default(0.01),
     measurement_noise: z.number().default(0.1),
     max_velocity: z.number().default(0.5),
-    smoothing_weight: z.number().default(0.7),
+    /**
+     * EMA smoothing weight, 0..1. Only applies when
+     * position_filter = ema.
+     *   0.0 → no smoothing
+     *   0.4 → modest (good for moving wearables)
+     *   0.7 → upstream companion default (heavier, more lag)
+     *   1.0 → very heavy
+     */
+    smoothing_weight: z.number().default(0.4),
     motion_sigma: z.number().default(2.0),
   })
   .prefault({});

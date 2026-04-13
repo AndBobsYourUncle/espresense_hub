@@ -24,14 +24,36 @@
  * maximum gap reset drops stale priors outright.
  */
 
-/** Time constant for the per-node EMA, in seconds. */
-const TAU_SECONDS = 3.0;
+/**
+ * Time constant for the per-node EMA, in seconds. Set at bootstrap from
+ * `filtering.smoothing_weight` in config.yaml — see `setSmoothingWeight`.
+ * Higher = smoother but laggier when the device moves; lower = more
+ * responsive but jittery when stationary.
+ */
+let TAU_SECONDS = 1.5;
 
 /** Minimum blend per update so same-ms bursts still advance the state. */
 const MIN_ALPHA = 0.05;
 
 /** Past this gap, treat the prior reading as stale and accept the raw value. */
 const MAX_GAP_MS = 30_000;
+
+/**
+ * Tune the input-side smoothing time constant from a 0..1 weight that
+ * matches `filtering.smoothing_weight` in config.yaml. Mapping:
+ *
+ *   weight 0.0 → τ = 0.0 s   (no smoothing, raw passthrough)
+ *   weight 0.4 → τ = 1.5 s   (current default — modest lag, modest jitter)
+ *   weight 0.7 → τ = 3.0 s   (upstream default — heavy smoothing)
+ *   weight 1.0 → τ = 5.0 s   (very heavy smoothing for noisy environments)
+ *
+ * Linear in `weight`, so the user can dial responsiveness up or down
+ * without thinking in time-constant units.
+ */
+export function setMeasurementSmoothingWeight(weight: number): void {
+  const w = Math.max(0, Math.min(1, weight));
+  TAU_SECONDS = w * 5;
+}
 
 /** Result of a measurement smoothing update. */
 export interface SmoothedMeasurement {
@@ -70,6 +92,9 @@ export function smoothMeasurementDistance(
   }
   const dtMs = Math.max(0, nowMs - prevSmoothedAt);
   if (dtMs >= MAX_GAP_MS) return { mean: rawNew, variance: 0 };
+
+  // τ = 0 means smoothing disabled — fast-path the raw passthrough.
+  if (TAU_SECONDS <= 0) return { mean: rawNew, variance: 0 };
 
   const dtSec = dtMs / 1000;
   const timeAlpha = 1 - Math.exp(-dtSec / TAU_SECONDS);
