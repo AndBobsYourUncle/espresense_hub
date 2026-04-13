@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { Floor } from "@/lib/config";
 import { polygonCentroid, tx, ty, txInv, tyInv, type FloorTransform } from "@/lib/map/geometry";
 import { useMapTool } from "./MapToolProvider";
@@ -173,60 +173,6 @@ function rasterBoundary(
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-const DOOR_ARROW_ID = "door-perp-arrow";
-const DOOR_HALF_LEN = 0.22; // half-length of the perpendicular arrow shaft, metres
-const DOOR_STROKE = 0.04;   // stroke width of the arrow shaft
-
-/**
- * Snap `(clickX, clickY)` (config-space metres) onto the nearest edge of a
- * polygon boundary. Returns the snapped point and the outward unit normal of
- * that edge, oriented toward `(facingX, facingY)`.
- */
-function snapToPolygonEdge(
-  clickX: number,
-  clickY: number,
-  points: readonly (readonly number[])[],
-  facingX: number,
-  facingY: number,
-): { snapped: [number, number]; nx: number; ny: number } | null {
-  const n = points.length;
-  if (n < 2) return null;
-
-  let bestDist = Infinity;
-  let bestResult: { snapped: [number, number]; nx: number; ny: number } | null = null;
-
-  for (let i = 0; i < n; i++) {
-    const ax = points[i][0], ay = points[i][1];
-    const bx = points[(i + 1) % n][0], by = points[(i + 1) % n][1];
-    const edgeDx = bx - ax, edgeDy = by - ay;
-    const len2 = edgeDx * edgeDx + edgeDy * edgeDy;
-
-    let sx: number, sy: number;
-    if (len2 < 1e-12) {
-      sx = ax; sy = ay;
-    } else {
-      const t = Math.max(0, Math.min(1, ((clickX - ax) * edgeDx + (clickY - ay) * edgeDy) / len2));
-      sx = ax + t * edgeDx;
-      sy = ay + t * edgeDy;
-    }
-
-    const dist = Math.hypot(clickX - sx, clickY - sy);
-    if (dist < bestDist) {
-      bestDist = dist;
-      // Unit normal, oriented toward `facing`
-      const edgeLen = Math.sqrt(len2) || 1;
-      const px = edgeDy / edgeLen, py = -edgeDx / edgeLen;
-      const dot = px * (facingX - sx) + py * (facingY - sy);
-      bestResult = {
-        snapped: [sx, sy],
-        nx: dot >= 0 ? px : -px,
-        ny: dot >= 0 ? py : -py,
-      };
-    }
-  }
-
-  return bestResult;
-}
 
 export default function RoomOverlay({ floor, transform }: Props) {
   const { activeTool } = useMapTool();
@@ -293,41 +239,69 @@ export default function RoomOverlay({ floor, transform }: Props) {
     });
   }, [floor.rooms, groupColorMap, transform]);
 
-  // Door placement: click on the editing room's boundary polygon → snap to the
-  // nearest edge and record the door position in config-space metres.
-  const handleWallClick = useCallback(
-    (e: React.MouseEvent<SVGPolygonElement>) => {
-      e.stopPropagation();
-      const rid = relations.doorPlacingForRoom;
-      const editingId = relations.editingRoomId;
-      if (!rid || !editingId) return;
+  // Door placement — hover snaps a preview dot to the cursor position on the edge.
+  const [hoverSnap, setHoverSnap] = useState<{ svgX: number; svgY: number } | null>(null);
 
-      const editingRoom = floor.rooms.find((r) => r.id === editingId);
-      if (!editingRoom?.points || editingRoom.points.length < 3) return;
-
+  const handleEdgeMouseMove = useCallback(
+    (
+      e: React.MouseEvent<SVGLineElement>,
+      sx1: number, sy1: number,
+      sx2: number, sy2: number,
+    ) => {
       const svg = (e.currentTarget as SVGElement).ownerSVGElement;
       if (!svg) return;
       const pt = svg.createSVGPoint();
-      pt.x = e.clientX;
-      pt.y = e.clientY;
+      pt.x = e.clientX; pt.y = e.clientY;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      const { x, y } = pt.matrixTransform(ctm.inverse());
+      const dx = sx2 - sx1, dy = sy2 - sy1;
+      const len2 = dx * dx + dy * dy;
+      let svgX: number, svgY: number;
+      if (len2 < 1e-12) {
+        svgX = sx1; svgY = sy1;
+      } else {
+        const t = Math.max(0, Math.min(1, ((x - sx1) * dx + (y - sy1) * dy) / len2));
+        svgX = sx1 + t * dx; svgY = sy1 + t * dy;
+      }
+      setHoverSnap({ svgX, svgY });
+    },
+    [],
+  );
+
+  const handleEdgeMouseLeave = useCallback(() => setHoverSnap(null), []);
+
+  // Click on a specific wall edge: snap to nearest point on that edge in config space.
+  const handleEdgeClick = useCallback(
+    (
+      e: React.MouseEvent<SVGLineElement>,
+      ax: number, ay: number,  // config-space edge endpoints
+      bx: number, by: number,
+    ) => {
+      e.stopPropagation();
+      const rid = relations.doorPlacingForRoom;
+      if (!rid) return;
+      const svg = (e.currentTarget as SVGElement).ownerSVGElement;
+      if (!svg) return;
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX; pt.y = e.clientY;
       const ctm = svg.getScreenCTM();
       if (!ctm) return;
       const svgPt = pt.matrixTransform(ctm.inverse());
       const clickX = txInv(transform, svgPt.x);
       const clickY = tyInv(transform, svgPt.y);
-
-      // Use the connected room's centroid to orient the wall normal.
-      const connRoom = floor.rooms.find((r) => r.id === rid);
-      const [facingX, facingY] =
-        connRoom?.points && connRoom.points.length >= 3
-          ? polygonCentroid(connRoom.points)
-          : [clickX, clickY];
-
-      const result = snapToPolygonEdge(clickX, clickY, editingRoom.points, facingX, facingY);
-      if (!result) return;
-      relations.setDoor(rid, result.snapped);
+      const edgeDx = bx - ax, edgeDy = by - ay;
+      const len2 = edgeDx * edgeDx + edgeDy * edgeDy;
+      let sx: number, sy: number;
+      if (len2 < 1e-12) { sx = ax; sy = ay; }
+      else {
+        const t = Math.max(0, Math.min(1, ((clickX - ax) * edgeDx + (clickY - ay) * edgeDy) / len2));
+        sx = ax + t * edgeDx; sy = ay + t * edgeDy;
+      }
+      setHoverSnap(null);
+      relations.setDoor(rid, [sx, sy]);
     },
-    [relations, transform, floor.rooms],
+    [relations, transform],
   );
 
   if (!isRelationsMode && !isZonesMode) return null;
@@ -348,7 +322,6 @@ export default function RoomOverlay({ floor, transform }: Props) {
     <>
       {isRelationsMode && (
         <defs>
-          {/* Connection arrow (room→room lines) */}
           <marker
             id={MARKER_ID}
             markerUnits="strokeWidth"
@@ -359,19 +332,6 @@ export default function RoomOverlay({ floor, transform }: Props) {
             orient="auto"
           >
             <polygon points="0 0, 8 3, 0 6" fill={ARROW_COLOR} />
-          </marker>
-          {/* Door perpendicular arrow — auto-start-reverse makes it
-              point outward at both ends of the shaft. */}
-          <marker
-            id={DOOR_ARROW_ID}
-            markerUnits="strokeWidth"
-            markerWidth="5"
-            markerHeight="4"
-            refX="5"
-            refY="2"
-            orient="auto-start-reverse"
-          >
-            <polygon points="0 0, 5 2, 0 4" fill="#0ea5e9" />
           </marker>
         </defs>
       )}
@@ -472,16 +432,21 @@ export default function RoomOverlay({ floor, transform }: Props) {
         })}
 
         {/* ── Connection arrows ─────────────────────────────────────────────── */}
+        {/* When a door is placed, the arrow starts from the door position on the
+            wall instead of the editing room's centroid. */}
         {isRelationsMode &&
           selectedEntry &&
           relations.draftOpenTo.map((connId) => {
             const connEntry = roomPolygons.find((e) => e?.room.id === connId);
             if (!connEntry) return null;
+            const door = relations.draftDoors[connId];
+            const x1 = door ? tx(transform, door[0]) : selectedEntry.sx;
+            const y1 = door ? ty(transform, door[1]) : selectedEntry.sy;
             return (
               <line
                 key={`conn-${connId}`}
-                x1={selectedEntry.sx}
-                y1={selectedEntry.sy}
+                x1={x1}
+                y1={y1}
                 x2={connEntry.sx}
                 y2={connEntry.sy}
                 stroke={ARROW_COLOR}
@@ -493,70 +458,40 @@ export default function RoomOverlay({ floor, transform }: Props) {
             );
           })}
 
-        {/* ── Door markers — perpendicular arrows on the wall ─────────────── */}
-        {isRelationsMode &&
-          selectedEntry &&
-          Object.entries(relations.draftDoors).map(([rid, [doorX, doorY]]) => {
-            const connRoom = floor.rooms.find((r) => r.id === rid);
-            if (!connRoom?.points || connRoom.points.length < 3) return null;
-            const [connCx, connCy] = polygonCentroid(connRoom.points);
-
-            // Find which wall edge the door sits on and its outward normal.
-            const edgeResult = selectedEntry.room.points
-              ? snapToPolygonEdge(doorX, doorY, selectedEntry.room.points, connCx, connCy)
-              : null;
-            if (!edgeResult) return null;
-
-            const { nx, ny } = edgeResult;
-            const sx = tx(transform, doorX);
-            const sy = ty(transform, doorY);
-
-            // Transform the config-space unit normal to SVG space.
-            const svgNx = transform.flipX ? -nx : nx;
-            const svgNy = transform.flipY ? -ny : ny;
-            const L = DOOR_HALF_LEN;
-
-            return (
-              <g key={`door-${rid}`} style={{ pointerEvents: "none" }}>
+        {/* ── Door placement edge picker — wall-pick lines on the editing room,
+             rendered last so they sit on top and capture hover/click. */}
+        {isRelationsMode && relations.doorPlacingForRoom && selectedEntry?.room.points &&
+          (() => {
+            const pts = selectedEntry.room.points!;
+            const n = pts.length;
+            return pts.map((_, i) => {
+              const a = pts[i];
+              const b = pts[(i + 1) % n];
+              const sx1 = tx(transform, a[0]), sy1 = ty(transform, a[1]);
+              const sx2 = tx(transform, b[0]), sy2 = ty(transform, b[1]);
+              return (
                 <line
-                  x1={sx - svgNx * L} y1={sy - svgNy * L}
-                  x2={sx + svgNx * L} y2={sy + svgNy * L}
-                  stroke="#0ea5e9"
-                  strokeWidth={DOOR_STROKE}
-                  strokeLinecap="round"
-                  markerStart={`url(#${DOOR_ARROW_ID})`}
-                  markerEnd={`url(#${DOOR_ARROW_ID})`}
+                  key={`door-pick-${i}`}
+                  x1={sx1} y1={sy1} x2={sx2} y2={sy2}
+                  className="wall-pick"
+                  onClick={(e) => handleEdgeClick(e, a[0], a[1], b[0], b[1])}
+                  onMouseMove={(e) => handleEdgeMouseMove(e, sx1, sy1, sx2, sy2)}
+                  onMouseLeave={handleEdgeMouseLeave}
                 />
-              </g>
-            );
-          })}
+              );
+            });
+          })()
+        }
 
-        {/* ── Door placement click target — rendered LAST so it sits on top.
-             Visible dashed highlight + thick invisible stroke for easy clicking. */}
-        {isRelationsMode && relations.doorPlacingForRoom && selectedEntry && (
-          <>
-            {/* Visible dashed cyan outline on the editing room boundary */}
-            <polygon
-              points={selectedEntry.pts}
-              fill="none"
-              stroke="#0ea5e9"
-              strokeWidth={0.05}
-              strokeDasharray="0.15 0.09"
-              strokeLinejoin="round"
-              style={{ pointerEvents: "none" }}
-            />
-            {/* Thick invisible click zone — pointer-events on the stroke only */}
-            <polygon
-              points={selectedEntry.pts}
-              fill="none"
-              stroke="#0ea5e9"
-              strokeWidth={0.4}
-              strokeOpacity={0}
-              strokeLinejoin="round"
-              style={{ cursor: "crosshair", pointerEvents: "stroke" }}
-              onClick={handleWallClick}
-            />
-          </>
+        {/* Snap preview dot — follows cursor along the hovered wall edge */}
+        {isRelationsMode && hoverSnap && (
+          <circle
+            cx={hoverSnap.svgX}
+            cy={hoverSnap.svgY}
+            r={0.12}
+            className="corner-pick"
+            style={{ pointerEvents: "none" }}
+          />
         )}
       </g>
     </>
