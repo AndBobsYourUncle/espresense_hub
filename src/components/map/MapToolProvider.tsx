@@ -20,7 +20,7 @@ import {
  *
  * (Editing nodes is still triggered by shift+click, regardless of tool.)
  */
-export type MapTool = "inspect" | "ruler" | "pin";
+export type MapTool = "inspect" | "ruler" | "pin" | "room-relations" | "presence-zones";
 
 interface MapToolContextValue {
   activeTool: MapTool;

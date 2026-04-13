@@ -12,6 +12,10 @@ import NodeEditProvider from "@/components/map/NodeEditProvider";
 import NodeInspectionPanel from "@/components/map/NodeInspectionPanel";
 import type { NodeMarkerData } from "@/components/map/NodeMarkers";
 import PinHighlightProvider from "@/components/map/PinHighlightProvider";
+import PresenceZonesPanel from "@/components/map/PresenceZonesPanel";
+import PresenceZonesProvider from "@/components/map/PresenceZonesProvider";
+import RoomRelationsPanel from "@/components/map/RoomRelationsPanel";
+import RoomRelationsProvider from "@/components/map/RoomRelationsProvider";
 import RulerPanel from "@/components/map/RulerPanel";
 import RulerProvider from "@/components/map/RulerProvider";
 import {
@@ -99,35 +103,41 @@ export default async function MapPage() {
           <RulerProvider>
             <NodeEditProvider>
               <MapToolProvider>
-                <PinHighlightProvider>
-                  {/* Page header — hidden in mobile landscape, where
-                      the floating MobileLandscapeChrome takes over so
-                      the map gets the full vertical height. */}
-                  <div className="max-lg:landscape:hidden">
-                    <PageHeader
-                      title="Map"
-                      description={summary}
-                      inline={<MapToolbar />}
-                    />
-                  </div>
-                  <main className="flex-1 min-h-0 p-6 max-lg:landscape:p-2">
-                    <MapStage>
-                      <FloorPlan config={config} floor={floor} />
-                      {/* Combined floating chrome (hamburger + title +
-                          vertical toolbar) for mobile landscape. Lets
-                          the map fill the full vertical height while
-                          keeping nav, identity, and tools accessible. */}
-                      <div className="hidden max-lg:landscape:block">
-                        <MobileLandscapeChrome summary={summary} />
+                <RoomRelationsProvider>
+                  <PresenceZonesProvider initialZones={config.presence.zones}>
+                    <PinHighlightProvider>
+                      {/* Page header — hidden in mobile landscape, where
+                          the floating MobileLandscapeChrome takes over so
+                          the map gets the full vertical height. */}
+                      <div className="max-lg:landscape:hidden">
+                        <PageHeader
+                          title="Map"
+                          description={summary}
+                          inline={<MapToolbar />}
+                        />
                       </div>
-                      <CompareLegend />
-                      <DeviceDetailPanel />
-                      <NodeInspectionPanel nodes={floorNodes} />
-                      <RulerPanel nodes={floorNodes} />
-                      <NodeEditPanel nodes={floorNodes} />
-                    </MapStage>
-                  </main>
-                </PinHighlightProvider>
+                      <main className="flex-1 min-h-0 p-6 max-lg:landscape:p-2">
+                        <MapStage>
+                          <FloorPlan config={config} floor={floor} />
+                          {/* Combined floating chrome (hamburger + title +
+                              vertical toolbar) for mobile landscape. Lets
+                              the map fill the full vertical height while
+                              keeping nav, identity, and tools accessible. */}
+                          <div className="hidden max-lg:landscape:block">
+                            <MobileLandscapeChrome summary={summary} />
+                          </div>
+                          <CompareLegend />
+                          <DeviceDetailPanel />
+                          <NodeInspectionPanel nodes={floorNodes} />
+                          <RulerPanel nodes={floorNodes} />
+                          <NodeEditPanel nodes={floorNodes} />
+                          <RoomRelationsPanel floor={floor} />
+                          <PresenceZonesPanel floor={floor} />
+                        </MapStage>
+                      </main>
+                    </PinHighlightProvider>
+                  </PresenceZonesProvider>
+                </RoomRelationsProvider>
               </MapToolProvider>
             </NodeEditProvider>
           </RulerProvider>

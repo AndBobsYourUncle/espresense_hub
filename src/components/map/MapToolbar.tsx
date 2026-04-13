@@ -1,7 +1,7 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import { GitCompareArrows, MapPin, MousePointer2, Ruler } from "lucide-react";
+import { GitCompareArrows, Layers, MapPin, MousePointer2, Network, Ruler } from "lucide-react";
 import { useIsTouch } from "@/lib/hooks/usePointerType";
 import { useMapTool, type MapTool } from "./MapToolProvider";
 
@@ -40,6 +40,24 @@ const TOOLS: ToolDef[] = [
       touch
         ? "Select a device, then long-press where you actually are to drop a pin. Tap pins to toggle accumulation, drag to move."
         : "Select a device, then SHIFT+click where you actually are to drop a pin. Click pins to toggle accumulation, drag to move.",
+  },
+  {
+    tool: "room-relations",
+    label: "Relations",
+    icon: Network,
+    hint: (touch) =>
+      touch
+        ? "Tap a room to edit its open_to connections and floor_area tag"
+        : "Click a room to edit its open_to connections and floor_area tag",
+  },
+  {
+    tool: "presence-zones",
+    label: "Zones",
+    icon: Layers,
+    hint: (touch) =>
+      touch
+        ? "Select a zone, then tap rooms to toggle their membership"
+        : "Select a zone, then click rooms to toggle their membership",
   },
 ];
 

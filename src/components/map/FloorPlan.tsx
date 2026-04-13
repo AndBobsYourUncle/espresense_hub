@@ -16,6 +16,7 @@ import DeviceMarkers from "./DeviceMarkers";
 import NodeDebugOverlay from "./NodeDebugOverlay";
 import NodeMarkers, { type NodeMarkerData } from "./NodeMarkers";
 import PinOverlay from "./PinOverlay";
+import RoomOverlay from "./RoomOverlay";
 import WallSelectionOverlay from "./WallSelectionOverlay";
 import { useMapViewport } from "./useMapViewport";
 import ViewportControls from "./ViewportControls";
@@ -154,6 +155,9 @@ export default function FloorPlan({ config, floor }: Props) {
           );
         })}
       </g>
+
+      {/* Room overlay — activates in room-relations and presence-zones modes */}
+      <RoomOverlay floor={floor} transform={transform} />
 
       {/* Wall picker — only renders during node-editor wall placement */}
       <WallSelectionOverlay floor={floor} transform={transform} />

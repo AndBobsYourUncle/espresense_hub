@@ -254,6 +254,192 @@ export async function readRawConfig(): Promise<{
   return { configPath, yaml };
 }
 
+/** Update the `open_to` and optionally `floor_area` of a room. */
+export async function updateRoomRelations(
+  floorId: string,
+  roomId: string,
+  openTo: string[],
+  floorArea: string | null | undefined,
+): Promise<void> {
+  const configPath = resolveConfigPath();
+  let yamlText: string;
+  try {
+    yamlText = await readFile(configPath, "utf8");
+  } catch {
+    throw new ConfigWriteError(
+      `Could not read config at ${configPath}`,
+      "not-found",
+    );
+  }
+
+  const doc = parseDocument(yamlText);
+  if (doc.errors.length > 0) {
+    throw new ConfigWriteError(
+      `Existing config has parse errors: ${doc.errors[0].message}`,
+      "parse-failed",
+    );
+  }
+
+  const floors = doc.get("floors");
+  if (!isSeq(floors)) {
+    throw new ConfigWriteError("Config has no `floors` sequence", "node-not-found");
+  }
+
+  let floorIdx = -1;
+  for (let f = 0; f < floors.items.length; f++) {
+    const item = floors.items[f];
+    if (!isMap(item)) continue;
+    const id = item.get("id");
+    const name = item.get("name");
+    const eid =
+      typeof id === "string" && id.length > 0
+        ? id
+        : typeof name === "string"
+          ? slugify(name)
+          : null;
+    if (eid === floorId) {
+      floorIdx = f;
+      break;
+    }
+  }
+  if (floorIdx === -1) {
+    throw new ConfigWriteError(`Floor "${floorId}" not found in config`, "node-not-found");
+  }
+
+  const rooms = doc.getIn(["floors", floorIdx, "rooms"]);
+  if (!isSeq(rooms)) {
+    throw new ConfigWriteError(
+      `Floor "${floorId}" has no rooms sequence`,
+      "node-not-found",
+    );
+  }
+
+  let roomIdx = -1;
+  for (let r = 0; r < rooms.items.length; r++) {
+    const item = rooms.items[r];
+    if (!isMap(item)) continue;
+    const id = item.get("id");
+    const name = item.get("name");
+    const eid =
+      typeof id === "string" && id.length > 0
+        ? id
+        : typeof name === "string"
+          ? slugify(name)
+          : null;
+    if (eid === roomId) {
+      roomIdx = r;
+      break;
+    }
+  }
+  if (roomIdx === -1) {
+    throw new ConfigWriteError(
+      `Room "${roomId}" not found in floor "${floorId}"`,
+      "node-not-found",
+    );
+  }
+
+  doc.setIn(["floors", floorIdx, "rooms", roomIdx, "open_to"], openTo);
+
+  const roomNode = doc.getIn(["floors", floorIdx, "rooms", roomIdx]);
+  if (isMap(roomNode)) {
+    if (floorArea != null && floorArea.trim().length > 0) {
+      roomNode.set("floor_area", floorArea.trim());
+    } else {
+      roomNode.delete("floor_area");
+    }
+  }
+
+  const newYaml = doc.toString();
+  const reparseDoc = parseDocument(newYaml);
+  if (reparseDoc.errors.length > 0) {
+    throw new ConfigWriteError(
+      `Internal: edited YAML failed to round-trip parse: ${reparseDoc.errors[0].message}`,
+      "invalid-after-edit",
+    );
+  }
+  const validation = ConfigSchema.safeParse(reparseDoc.toJS());
+  if (!validation.success) {
+    const issue = validation.error.issues[0];
+    const issuePath = issue?.path?.join(".") ?? "(root)";
+    throw new ConfigWriteError(
+      `Edited config failed validation at ${issuePath}: ${issue?.message ?? "unknown"}`,
+      "invalid-after-edit",
+    );
+  }
+
+  const dir = path.dirname(configPath);
+  const base = path.basename(configPath);
+  const tmpPath = path.join(dir, `.${base}.tmp-${process.pid}`);
+  try {
+    await writeFile(tmpPath, newYaml, "utf8");
+    await rename(tmpPath, configPath);
+  } catch (err) {
+    throw new ConfigWriteError(
+      `Failed to write config: ${(err as Error).message}`,
+      "io-failed",
+    );
+  }
+}
+
+/** Replace the `presence.zones` array in config.yaml. */
+export async function updatePresenceZones(zones: unknown[]): Promise<void> {
+  const configPath = resolveConfigPath();
+  let yamlText: string;
+  try {
+    yamlText = await readFile(configPath, "utf8");
+  } catch {
+    throw new ConfigWriteError(
+      `Could not read config at ${configPath}`,
+      "not-found",
+    );
+  }
+
+  const doc = parseDocument(yamlText);
+  if (doc.errors.length > 0) {
+    throw new ConfigWriteError(
+      `Existing config has parse errors: ${doc.errors[0].message}`,
+      "parse-failed",
+    );
+  }
+
+  // Ensure the `presence` mapping exists before setting a sub-key.
+  if (!isMap(doc.get("presence"))) {
+    doc.set("presence", doc.createNode({}));
+  }
+  doc.setIn(["presence", "zones"], zones);
+
+  const newYaml = doc.toString();
+  const reparseDoc = parseDocument(newYaml);
+  if (reparseDoc.errors.length > 0) {
+    throw new ConfigWriteError(
+      `Internal: edited YAML failed to round-trip parse: ${reparseDoc.errors[0].message}`,
+      "invalid-after-edit",
+    );
+  }
+  const validation = ConfigSchema.safeParse(reparseDoc.toJS());
+  if (!validation.success) {
+    const issue = validation.error.issues[0];
+    const issuePath = issue?.path?.join(".") ?? "(root)";
+    throw new ConfigWriteError(
+      `Edited config failed validation at ${issuePath}: ${issue?.message ?? "unknown"}`,
+      "invalid-after-edit",
+    );
+  }
+
+  const dir = path.dirname(configPath);
+  const base = path.basename(configPath);
+  const tmpPath = path.join(dir, `.${base}.tmp-${process.pid}`);
+  try {
+    await writeFile(tmpPath, newYaml, "utf8");
+    await rename(tmpPath, configPath);
+  } catch (err) {
+    throw new ConfigWriteError(
+      `Failed to write config: ${(err as Error).message}`,
+      "io-failed",
+    );
+  }
+}
+
 /** Update the `point` field of a node identified by `nodeId`. */
 export async function updateNodePoint(
   nodeId: string,
