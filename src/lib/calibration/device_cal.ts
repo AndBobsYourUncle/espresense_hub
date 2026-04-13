@@ -242,6 +242,18 @@ export function accumulatePinSample(
     stats = { sampleCount: 0, sumBias: 0, sumBias2: 0, lastUpdateMs: 0 };
     pin.nodeBias.set(nodeId, stats);
   }
+  // Defensive cap: keep sampleCount bounded to ~MAX so very long-running
+  // pins don't drift the streaming sums into precision-loss territory.
+  // Same proportional-decay treatment used by per-pair stats and locator
+  // comparisons. Once full, behaves as a moving average — newest sample
+  // has weight 1/MAX. With our typical update rate (~1/sec/node), this
+  // doesn't kick in until ~3 hours of continuous accumulation per pair.
+  if (stats.sampleCount >= PIN_BIAS_MAX_SAMPLES) {
+    const factor = (PIN_BIAS_MAX_SAMPLES - 1) / PIN_BIAS_MAX_SAMPLES;
+    stats.sampleCount = PIN_BIAS_MAX_SAMPLES - 1;
+    stats.sumBias *= factor;
+    stats.sumBias2 *= factor;
+  }
   stats.sampleCount += 1;
   stats.sumBias += bias;
   stats.sumBias2 += bias * bias;
@@ -251,6 +263,15 @@ export function accumulatePinSample(
   // the pin stays active.
   pin.activeUntilMs = Date.now() + DEFAULT_ACTIVE_DURATION_MS;
 }
+
+/**
+ * Effective max sample count per (pin, node) pair. Past this point,
+ * accumulation switches from "running sum forever" to "moving average"
+ * via the proportional-decay pattern. Same magnitude as the per-pair
+ * (W) cap and the locator-comparison cap, for consistency across
+ * accumulators.
+ */
+const PIN_BIAS_MAX_SAMPLES = 10_000;
 
 /** Compute the mean and stddev from accumulated stats. */
 export function biasStatsToEstimate(
