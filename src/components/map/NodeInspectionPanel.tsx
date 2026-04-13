@@ -107,7 +107,7 @@ export default function NodeInspectionPanel({ nodes }: Props) {
         className="h-10 px-3 flex items-center justify-between gap-2 border-b border-zinc-100 dark:border-zinc-800 cursor-grab active:cursor-grabbing select-none"
       >
         <div className="min-w-0">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-400">
+          <div className="text-xs uppercase tracking-wide text-zinc-400">
             Node
           </div>
           <div className="text-sm font-semibold truncate">
@@ -137,9 +137,9 @@ export default function NodeInspectionPanel({ nodes }: Props) {
         </div>
       </header>
 
-      <div className="px-4 py-3 space-y-3 text-[11px]">
+      <div className="px-4 py-3 space-y-3 text-xs">
         <section className="space-y-1">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-400">
+          <div className="text-xs uppercase tracking-wide text-zinc-400">
             Position
           </div>
           <InfoRow
@@ -149,7 +149,7 @@ export default function NodeInspectionPanel({ nodes }: Props) {
         </section>
 
         <section className="space-y-1 pt-2 border-t border-zinc-100 dark:border-zinc-800">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-400">
+          <div className="text-xs uppercase tracking-wide text-zinc-400">
             Calibration
           </div>
           {info ? (
@@ -174,7 +174,7 @@ export default function NodeInspectionPanel({ nodes }: Props) {
 
         {info && info.gtCount > 0 && (
           <section className="space-y-1 pt-2 border-t border-zinc-100 dark:border-zinc-800">
-            <div className="text-[10px] uppercase tracking-wide text-zinc-400">
+            <div className="text-xs uppercase tracking-wide text-zinc-400">
               Ground-truth bias
             </div>
             <InfoRow
@@ -194,14 +194,14 @@ export default function NodeInspectionPanel({ nodes }: Props) {
           <section className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
             <a
               href={`/calibration?node=${encodeURIComponent(inspectedNodeId)}`}
-              className="inline-block text-[10px] text-blue-600 dark:text-blue-400 hover:underline"
+              className="inline-block text-xs text-blue-600 dark:text-blue-400 hover:underline"
             >
               See per-pair breakdown ({info.pairs.length} neighbors) →
             </a>
           </section>
         )}
 
-        <p className="text-[10px] text-zinc-400 leading-relaxed pt-2 border-t border-zinc-100 dark:border-zinc-800">
+        <p className="text-xs text-zinc-400 leading-relaxed pt-2 border-t border-zinc-100 dark:border-zinc-800">
           Drag the header to move this panel. Other nodes&apos; measured-distance
           circles around this node are shown on the map.
         </p>

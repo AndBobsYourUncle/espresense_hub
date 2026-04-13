@@ -121,7 +121,7 @@ export default function DevicePinsPanel({ deviceId }: Props) {
   if (!deviceId || pins.length === 0) {
     return (
       <section className="px-4 py-3 border-t border-zinc-200 dark:border-zinc-800">
-        <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1">
+        <div className="text-xs uppercase tracking-wide text-zinc-400 mb-1">
           Pins
         </div>
         <div className="text-xs text-zinc-500">
@@ -142,7 +142,7 @@ export default function DevicePinsPanel({ deviceId }: Props) {
   return (
     <section className="px-4 py-3 border-t border-zinc-200 dark:border-zinc-800">
       <div className="flex items-baseline justify-between mb-2">
-        <div className="text-[10px] uppercase tracking-wide text-zinc-400">
+        <div className="text-xs uppercase tracking-wide text-zinc-400">
           Pins ({pins.length})
         </div>
         {refRssi != null && (
@@ -150,7 +150,7 @@ export default function DevicePinsPanel({ deviceId }: Props) {
             type="button"
             onClick={applyRssi}
             disabled={applying}
-            className={`text-[11px] px-2 py-1 rounded font-medium transition-colors ${
+            className={`text-xs px-2 py-1 rounded font-medium transition-colors ${
               applied
                 ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
                 : "bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50"
@@ -197,12 +197,12 @@ export default function DevicePinsPanel({ deviceId }: Props) {
                 </div>
                 <div className="flex items-center gap-2">
                   {pin.active ? (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase text-sky-600 dark:text-sky-400">
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold uppercase text-sky-600 dark:text-sky-400">
                       <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse" />
                       accumulating
                     </span>
                   ) : (
-                    <span className="text-[10px] text-zinc-400">
+                    <span className="text-xs text-zinc-400">
                       {ageMin < 60
                         ? `${Math.round(ageMin)}m ago`
                         : ageMin < 1440
@@ -230,12 +230,12 @@ export default function DevicePinsPanel({ deviceId }: Props) {
                   </button>
                 </div>
               </div>
-              <div className="text-[10px] text-zinc-500 mb-1.5">
+              <div className="text-xs text-zinc-500 mb-1.5">
                 {totalSamples} samples · {Object.keys(pin.nodeBias).length}{" "}
                 nodes
               </div>
               {Object.keys(pin.nodeBias).length > 0 && (
-                <details className="text-[10px]" onClick={(e) => e.stopPropagation()}>
+                <details className="text-xs" onClick={(e) => e.stopPropagation()}>
                   <summary className="cursor-pointer text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 select-none">
                     per-node bias
                   </summary>
@@ -277,7 +277,7 @@ export default function DevicePinsPanel({ deviceId }: Props) {
         })}
       </div>
 
-      <div className="mt-2 text-[10px] text-zinc-400 leading-relaxed">
+      <div className="mt-2 text-xs text-zinc-400 leading-relaxed">
         Hover a row to highlight on the map. Click to toggle accumulation. On
         the map: <strong>shift+click</strong> empty space to add a pin,{" "}
         <strong>drag</strong> a pin to reposition.

@@ -389,12 +389,12 @@ export default function SettingsClient() {
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-2 border-t border-zinc-200 dark:border-zinc-800 text-[11px] text-zinc-500 leading-relaxed">
+      <div className="px-4 py-2 border-t border-zinc-200 dark:border-zinc-800 text-xs text-zinc-500 leading-relaxed">
         Validated against the schema before writing. Atomic write — a partial
         save can&apos;t corrupt the file. Comments and untouched fields are
         preserved through structured edits. Most changes apply live; MQTT and
         filtering settings need a service restart.{" "}
-        <kbd className="font-mono text-[10px] px-1 py-px rounded border border-zinc-300 dark:border-zinc-700">
+        <kbd className="font-mono text-xs px-1 py-px rounded border border-zinc-300 dark:border-zinc-700">
           ⌘/Ctrl+S
         </kbd>{" "}
         to save.
@@ -451,7 +451,7 @@ function Field({
           {label}
         </div>
         {hint && (
-          <div className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">
+          <div className="text-xs text-zinc-500 mt-0.5 leading-relaxed">
             {hint}
           </div>
         )}
@@ -476,7 +476,7 @@ function Section({
         {title}
       </h2>
       {description && (
-        <p className="text-[11px] text-zinc-500 mt-1 mb-2 leading-relaxed">
+        <p className="text-xs text-zinc-500 mt-1 mb-2 leading-relaxed">
           {description}
         </p>
       )}
@@ -539,7 +539,7 @@ function NumberInput({
         className="w-32 h-8 px-2.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-500"
       />
       {unit && (
-        <span className="text-[11px] text-zinc-500 font-mono">{unit}</span>
+        <span className="text-xs text-zinc-500 font-mono">{unit}</span>
       )}
     </div>
   );
@@ -1077,7 +1077,7 @@ function MiniField({
   return (
     <label className="block min-w-0">
       <span
-        className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-0.5"
+        className="block text-xs uppercase tracking-wider text-zinc-500 mb-0.5"
         title={hint}
       >
         {label}
@@ -1129,7 +1129,7 @@ function DevicesTab({ doc, setField, addToList, deleteAt }: DocListProps) {
     <>
       <Section
         title="Tracked devices"
-        description="Match rules for devices the hub should track and compute positions for. Each entry can specify an ID (BLE MAC, IRK, alias) and/or a name. If both are set, both must match. If neither list is empty, only matching devices are tracked. Service restart required."
+        description="Allowlist for devices the hub should track. Each entry can specify an ID (BLE MAC, IRK, alias) and/or a name; a device matches if EITHER pattern matches (not AND). Both fields support `*` wildcards. Leave this list empty to track every device the hub hears (the typical default — let the hub auto-discover, then add noisy entries to Excluded below). Service restart required."
       >
         {tracked.length === 0 ? (
           <EmptyList message="No tracked-device rules. With this list empty, every device the hub hears gets tracked." />
@@ -1164,7 +1164,7 @@ function DevicesTab({ doc, setField, addToList, deleteAt }: DocListProps) {
 
       <Section
         title="Excluded devices"
-        description="Match rules for devices the hub should ignore entirely (no tracking, no calibration). Useful for filtering out random BLE noise from passing phones, beacons, etc."
+        description="Denylist — matches here are dropped before the include check, so a device in both lists is excluded. Same OR-match-with-`*`-wildcards semantics as the tracked list. Useful for filtering BLE noise from passing phones, beacons, neighbors' devices."
       >
         {excluded.length === 0 ? (
           <EmptyList message="No exclusion rules." />
@@ -1453,7 +1453,7 @@ function AdvancedTab({
         spellCheck={false}
         className="w-full h-full min-h-[400px] resize-none rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 p-3 font-mono text-xs leading-relaxed text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
       />
-      <p className="mt-2 text-[11px] text-zinc-500">
+      <p className="mt-2 text-xs text-zinc-500">
         Raw YAML editor for fields not exposed in the structured tabs (floors,
         rooms, nodes, devices, locator weights, etc.). Validated on save.
       </p>

@@ -38,7 +38,7 @@ export default function CompareLegend() {
       className="absolute bottom-4 right-4 z-10 rounded-lg bg-white/95 dark:bg-zinc-950/95 backdrop-blur border border-zinc-200 dark:border-zinc-800 shadow-sm p-2.5 min-w-[140px]"
       aria-label="Locator legend"
     >
-      <div className="text-[10px] uppercase tracking-wider font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5">
+      <div className="text-xs uppercase tracking-wider font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5">
         Locators
       </div>
       <ul className="space-y-1">

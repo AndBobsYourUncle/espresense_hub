@@ -137,11 +137,11 @@ export default function Sidebar() {
           )}
         </div>
         <div className="px-3 flex items-center justify-between gap-2">
-          <span className="text-[10px] uppercase tracking-wide text-zinc-400">
+          <span className="text-xs uppercase tracking-wide text-zinc-400">
             units
           </span>
           <div
-            className="inline-flex rounded-md border border-zinc-200 dark:border-zinc-800 overflow-hidden text-[10px] font-medium"
+            className="inline-flex rounded-md border border-zinc-200 dark:border-zinc-800 overflow-hidden text-xs font-medium"
             role="group"
             aria-label="Unit system"
           >

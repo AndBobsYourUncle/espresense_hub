@@ -48,7 +48,7 @@ function OffsetRow({
 }) {
   return (
     <label className="flex items-center gap-2">
-      <span className="w-20 text-[11px] text-zinc-500">{label}</span>
+      <span className="w-20 text-xs text-zinc-500">{label}</span>
       <DistanceInput valueMeters={value} onChangeMeters={onChange} />
     </label>
   );
@@ -60,7 +60,7 @@ function ManualEditor() {
   if (!draft) return null;
   return (
     <section className="px-4 py-4 border-b border-zinc-200 dark:border-zinc-800">
-      <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-3">
+      <div className="text-xs uppercase tracking-wide text-zinc-400 mb-3">
         Position
       </div>
       <div className="space-y-2.5">
@@ -80,7 +80,7 @@ function ManualEditor() {
           onChange={(z) => setDraft([draft[0], draft[1], z])}
         />
       </div>
-      <p className="mt-3 text-[11px] text-zinc-400 leading-relaxed">
+      <p className="mt-3 text-xs text-zinc-400 leading-relaxed">
         ↑ / ↓ in any field nudges. The map updates as you type.
       </p>
 
@@ -134,20 +134,20 @@ function WallEditor() {
     <section className="px-4 py-4 border-b border-zinc-200 dark:border-zinc-800 space-y-3">
       <div className="flex items-baseline justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-400">
+          <div className="text-xs uppercase tracking-wide text-zinc-400">
             Wall
           </div>
           <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
             {selectedWall.roomName}
           </div>
-          <div className="text-[11px] font-mono text-zinc-500">
+          <div className="text-xs font-mono text-zinc-500">
             {formatDistanceDisplay(selectedWall.length, units)} long
           </div>
         </div>
         <button
           type="button"
           onClick={() => setFlipped((f) => !f)}
-          className="shrink-0 h-7 inline-flex items-center gap-1 px-2 rounded-md text-[10px] font-medium border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300"
+          className="shrink-0 h-7 inline-flex items-center gap-1 px-2 rounded-md text-xs font-medium border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300"
           title="Flip which corner is the start"
         >
           <FlipHorizontal2 className="h-3 w-3" />
@@ -166,7 +166,7 @@ function WallEditor() {
       </div>
 
       {draft && (
-        <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 text-[11px] font-mono text-zinc-500 flex justify-between">
+        <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 text-xs font-mono text-zinc-500 flex justify-between">
           <span>computed</span>
           <span className="text-zinc-900 dark:text-zinc-100">
             {formatDistanceDisplay(draft[0], units)},{" "}
@@ -220,7 +220,7 @@ function CornerEditor() {
   return (
     <section className="px-4 py-4 border-b border-zinc-200 dark:border-zinc-800 space-y-3">
       <div>
-        <div className="text-[10px] uppercase tracking-wide text-zinc-400">
+        <div className="text-xs uppercase tracking-wide text-zinc-400">
           Corner
         </div>
         <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
@@ -228,7 +228,7 @@ function CornerEditor() {
             ? selectedCorner.roomNames.join(" · ")
             : "Room corner"}
         </div>
-        <div className="text-[11px] font-mono text-zinc-500">
+        <div className="text-xs font-mono text-zinc-500">
           ({formatDistanceDisplay(selectedCorner.point[0], units)},{" "}
           {formatDistanceDisplay(selectedCorner.point[1], units)})
         </div>
@@ -240,13 +240,13 @@ function CornerEditor() {
         <OffsetRow label="height (Z)" value={zValue} onChange={setZValue} />
       </div>
 
-      <p className="text-[11px] text-zinc-400 leading-relaxed">
+      <p className="text-xs text-zinc-400 leading-relaxed">
         ΔX and ΔY are offsets from the corner in floor coordinates. Watch the
         marker move on the map and adjust signs as needed.
       </p>
 
       {draft && (
-        <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 text-[11px] font-mono text-zinc-500 flex justify-between">
+        <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 text-xs font-mono text-zinc-500 flex justify-between">
           <span>computed</span>
           <span className="text-zinc-900 dark:text-zinc-100">
             {formatDistanceDisplay(draft[0], units)},{" "}
@@ -276,7 +276,7 @@ function PickPrompt() {
       <div className="text-sm text-zinc-700 dark:text-zinc-300 font-medium">
         Pick a wall or corner on the map
       </div>
-      <p className="mt-2 text-[11px] text-zinc-500 leading-relaxed">
+      <p className="mt-2 text-xs text-zinc-500 leading-relaxed">
         Every wall is highlighted in blue and every corner is a clickable
         dot. Click a wall to enter an offset along it, or a corner to enter
         ΔX / ΔY offsets — whichever is easier to measure with a tape.
@@ -352,7 +352,7 @@ export default function NodeEditPanel({ nodes }: Props) {
         style={{ cursor: dragging ? "grabbing" : "grab", touchAction: "none" }}
       >
         <div className="min-w-0">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-400">
+          <div className="text-xs uppercase tracking-wide text-zinc-400">
             Edit node
           </div>
           <div className="font-semibold text-sm truncate">

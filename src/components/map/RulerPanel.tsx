@@ -291,13 +291,13 @@ export default function RulerPanel({ nodes }: Props) {
   const renderConfigMeasuredRow = () => (
     <div className="grid grid-cols-2 gap-3">
       <div>
-        <div className="text-[10px] uppercase text-zinc-400 mb-1">Config</div>
+        <div className="text-xs uppercase text-zinc-400 mb-1">Config</div>
         <div className="font-mono text-sm text-zinc-900 dark:text-zinc-100">
           {formatDistanceDisplay(configDistance!, units)}
         </div>
       </div>
       <div>
-        <div className="text-[10px] uppercase text-zinc-400 mb-1">Measured</div>
+        <div className="text-xs uppercase text-zinc-400 mb-1">Measured</div>
         <div className="flex items-baseline gap-1">
           <input
             ref={inputRef}
@@ -392,7 +392,7 @@ export default function RulerPanel({ nodes }: Props) {
               <div className="text-sm text-zinc-700 dark:text-zinc-300 font-medium">
                 Click a wall on the map
               </div>
-              <p className="text-[11px] text-zinc-500 leading-relaxed">
+              <p className="text-xs text-zinc-500 leading-relaxed">
                 Every wall is highlighted. Pick the one you can easily measure
                 with a tape (typically an exterior wall or a long interior
                 wall).
@@ -450,7 +450,7 @@ export default function RulerPanel({ nodes }: Props) {
               <Ruler className="h-3.5 w-3.5" />
               Measure a wall
             </button>
-            <p className="mt-2 text-[10px] text-zinc-400 leading-relaxed">
+            <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
               Or click any node on the map to measure node-to-node.
             </p>
           </div>
@@ -460,13 +460,13 @@ export default function RulerPanel({ nodes }: Props) {
       {history.length > 0 && (
         <div className="flex-1 min-h-0 flex flex-col">
           <div className="px-4 pt-3 pb-1 flex items-baseline justify-between">
-            <div className="text-[10px] uppercase tracking-wide text-zinc-400">
+            <div className="text-xs uppercase tracking-wide text-zinc-400">
               History
             </div>
             <button
               type="button"
               onClick={clearHistory}
-              className="text-[10px] text-zinc-400 hover:text-red-600 dark:hover:text-red-400 inline-flex items-center gap-1"
+              className="text-xs text-zinc-400 hover:text-red-600 dark:hover:text-red-400 inline-flex items-center gap-1"
             >
               <Trash2 className="h-2.5 w-2.5" />
               Clear all
@@ -507,7 +507,7 @@ export default function RulerPanel({ nodes }: Props) {
                       <X className="h-3 w-3" />
                     </button>
                   </div>
-                  <div className="mt-0.5 flex items-baseline justify-between gap-2 text-[11px] font-mono text-zinc-500">
+                  <div className="mt-0.5 flex items-baseline justify-between gap-2 text-xs font-mono text-zinc-500">
                     <span>
                       {formatDistanceDisplay(m.configDistance, units)} →{" "}
                       {formatDistanceDisplay(m.actualDistance, units)}
@@ -528,7 +528,7 @@ export default function RulerPanel({ nodes }: Props) {
 
           {/* Stats footer */}
           {stats && stats.count >= 2 && (
-            <div className="px-4 py-2.5 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/30 text-[11px] space-y-0.5">
+            <div className="px-4 py-2.5 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/30 text-xs space-y-0.5">
               {stats.outlierIds.size > 0 && stats.trimmedCount > 0 ? (
                 <>
                   <div className="flex items-baseline justify-between">
@@ -567,7 +567,7 @@ export default function RulerPanel({ nodes }: Props) {
                   </div>
                 </>
               )}
-              <div className="text-[10px] text-zinc-400 pt-1 leading-relaxed">
+              <div className="text-xs text-zinc-400 pt-1 leading-relaxed">
                 {(() => {
                   const tightAll = stats.maxScale - stats.minScale < 0.04;
                   const tightTrimmed =
@@ -594,7 +594,7 @@ export default function RulerPanel({ nodes }: Props) {
         Math.abs(applicableScale - 1) > 0.001 && (
           <div className="px-4 py-3 border-t border-zinc-200 dark:border-zinc-800 space-y-2 shrink-0">
             {applyError && (
-              <div className="text-[11px] text-red-600 dark:text-red-400">
+              <div className="text-xs text-red-600 dark:text-red-400">
                 {applyError}
               </div>
             )}
@@ -609,7 +609,7 @@ export default function RulerPanel({ nodes }: Props) {
                 ? "Rescaling…"
                 : `Apply × ${applicableScale.toFixed(3)} to map`}
             </button>
-            <p className="text-[10px] text-zinc-400 leading-relaxed">
+            <p className="text-xs text-zinc-400 leading-relaxed">
               Multiplies every node, room polygon, and floor bounds by{" "}
               <span className="font-mono">× {applicableScale.toFixed(3)}</span>{" "}
               ({applicableSource}). Z heights stay put. History is cleared

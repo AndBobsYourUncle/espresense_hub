@@ -93,7 +93,7 @@ function MeasurementRow({
       </div>
       <div className="mt-1 grid grid-cols-3 gap-1.5 text-zinc-500 font-mono">
         <div>
-          <div className="text-[10px] text-zinc-400 uppercase">measured</div>
+          <div className="text-xs text-zinc-400 uppercase">measured</div>
           <div>
             {m.measuredDistance != null
               ? formatDistanceDisplay(m.measuredDistance, units)
@@ -101,7 +101,7 @@ function MeasurementRow({
           </div>
         </div>
         <div>
-          <div className="text-[10px] text-zinc-400 uppercase">expected</div>
+          <div className="text-xs text-zinc-400 uppercase">expected</div>
           <div>
             {m.expectedDistance != null
               ? formatDistanceDisplay(m.expectedDistance, units)
@@ -109,12 +109,12 @@ function MeasurementRow({
           </div>
         </div>
         <div>
-          <div className="text-[10px] text-zinc-400 uppercase">RSSI</div>
+          <div className="text-xs text-zinc-400 uppercase">RSSI</div>
           <div>{m.rssi != null ? `${m.rssi} dBm` : "—"}</div>
         </div>
       </div>
       {hasCorrection && m.correctedDistance != null && m.nEffective != null && (
-        <div className="mt-1.5 text-[10px] text-zinc-500 font-mono flex items-center justify-between gap-2">
+        <div className="mt-1.5 text-xs text-zinc-500 font-mono flex items-center justify-between gap-2">
           <span className="text-zinc-400 uppercase">path-aware</span>
           <span>
             → {formatDistanceDisplay(m.correctedDistance, units)}
@@ -150,7 +150,7 @@ function ConfidenceBreakdown({
     },
   ];
   return (
-    <div className="mt-2 space-y-1 text-[11px] font-mono text-zinc-500 dark:text-zinc-400 pl-2 border-l border-zinc-200 dark:border-zinc-800">
+    <div className="mt-2 space-y-1 text-xs font-mono text-zinc-500 dark:text-zinc-400 pl-2 border-l border-zinc-200 dark:border-zinc-800">
       {rows.map((r) => (
         <div key={r.label} className="flex items-center gap-2">
           <span className="text-zinc-400 w-16">{r.label}</span>
@@ -171,7 +171,7 @@ function ConfidenceBreakdown({
         </div>
       ))}
       {breakdown.convergencePenaltyApplied && (
-        <div className="text-amber-600 dark:text-amber-400 text-[10px]">
+        <div className="text-amber-600 dark:text-amber-400 text-xs">
           ⚠ iteration didn’t converge — 10% penalty applied
         </div>
       )}
@@ -206,7 +206,7 @@ export default function DeviceDetailPanel() {
         style={{ cursor: dragging ? "grabbing" : "grab", touchAction: "none" }}
       >
         <div className="min-w-0">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-400">
+          <div className="text-xs uppercase tracking-wide text-zinc-400">
             Device
           </div>
           <div className="text-sm font-semibold truncate">
@@ -233,7 +233,7 @@ export default function DeviceDetailPanel() {
         ) : (
           <>
             <section className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
-              <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-2">
+              <div className="text-xs uppercase tracking-wide text-zinc-400 mb-2">
                 Position
               </div>
               {detail.position ? (
@@ -310,10 +310,10 @@ export default function DeviceDetailPanel() {
                     className="w-full px-4 pt-3 pb-2 flex items-center justify-between gap-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-900/40 transition-colors"
                   >
                     <div className="flex items-baseline gap-3 min-w-0">
-                      <span className="text-[10px] uppercase tracking-wide text-zinc-400">
+                      <span className="text-xs uppercase tracking-wide text-zinc-400">
                         Measurements
                       </span>
-                      <span className="text-[11px] text-zinc-500 truncate">
+                      <span className="text-xs text-zinc-500 truncate">
                         {total === 0
                           ? "no nodes"
                           : rejected > 0
@@ -350,7 +350,7 @@ export default function DeviceDetailPanel() {
             <DevicePinsPanel deviceId={selectedId} />
 
             {measurementsOpen && (
-              <section className="px-4 py-3 border-t border-zinc-200 dark:border-zinc-800 text-[10px] text-zinc-400 space-y-1">
+              <section className="px-4 py-3 border-t border-zinc-200 dark:border-zinc-800 text-xs text-zinc-400 space-y-1">
                 <div className="flex items-center gap-2">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                   consistent (residual &lt; {formatDistanceDisplay(1, units)})

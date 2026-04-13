@@ -291,13 +291,13 @@ export default function CalibrationPageClient() {
                     <Th>Settings</Th>
                     <Th className="text-right">
                       GT bias
-                      <div className="text-[9px] normal-case font-normal text-zinc-400">
+                      <div className="text-xs normal-case font-normal text-zinc-400">
                         node→node
                       </div>
                     </Th>
                     <Th className="text-right">
                       LOO bias
-                      <div className="text-[9px] normal-case font-normal text-zinc-400">
+                      <div className="text-xs normal-case font-normal text-zinc-400">
                         leave-one-out
                       </div>
                     </Th>
@@ -343,7 +343,7 @@ export default function CalibrationPageClient() {
                             <span className="font-medium text-zinc-900 dark:text-zinc-100">
                               {n.nodeId}
                             </span>
-                            <span className="text-[10px] text-zinc-400">
+                            <span className="text-xs text-zinc-400">
                               {cls.label}
                             </span>
                             <RateLimitBadge nodeId={n.nodeId} audit={audit} />
@@ -715,7 +715,7 @@ function AutoApplyStatus({
           {/* Rate-limited nodes section — only shown if any are cooling. */}
           {rateLimited.length > 0 && (
             <section>
-              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+              <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-zinc-500 mb-1.5">
                 <Clock className="h-3 w-3" />
                 Rate-limited
                 <span className="normal-case tracking-normal text-zinc-400">
@@ -723,7 +723,7 @@ function AutoApplyStatus({
                   cannot re-push until cooldown clears
                 </span>
               </div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-mono text-[11px]">
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1 font-mono text-xs">
                 {rateLimited.map((r) => (
                   <div
                     key={r.nodeId}
@@ -741,7 +741,7 @@ function AutoApplyStatus({
 
           {/* Recent events section. */}
           <section>
-            <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">
+            <div className="text-xs uppercase tracking-wider text-zinc-500 mb-1.5">
               Recent pushes
               {events.length > 0 && (
                 <span className="normal-case tracking-normal text-zinc-400">
@@ -751,7 +751,7 @@ function AutoApplyStatus({
               )}
             </div>
             {events.length === 0 ? (
-              <div className="text-zinc-500 text-[11px] leading-relaxed">
+              <div className="text-zinc-500 text-xs leading-relaxed">
                 No auto-apply events yet. The system pushes a calibration
                 update when a node&apos;s proposed absorption differs from
                 its current value by more than 0.05 (rate-limited to once
@@ -760,8 +760,8 @@ function AutoApplyStatus({
                 that&apos;s the steady state.
               </div>
             ) : (
-              <table className="w-full text-[11px] font-mono tabular-nums">
-                <thead className="text-[10px] uppercase text-zinc-400">
+              <table className="w-full text-xs font-mono tabular-nums">
+                <thead className="text-xs uppercase text-zinc-400">
                   <tr>
                     <th className="text-left font-normal py-1 w-20">when</th>
                     <th className="text-left font-normal py-1">node</th>
@@ -834,7 +834,7 @@ function RateLimitBadge({
   if (clearsInMs <= 0) return null;
   return (
     <span
-      className="inline-flex items-center gap-1 text-[10px] font-mono tabular-nums px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400"
+      className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400"
       title={`Auto-apply pushed this node ${formatRelativeTime(Date.now() - lastApplied)}; next push allowed in ${formatCountdown(clearsInMs)} (${(audit.rateLimitMs / 60_000).toFixed(0)}-min cooldown)`}
     >
       <Clock className="h-2.5 w-2.5" />
@@ -881,11 +881,11 @@ function PairBreakdown({
 
   return (
     <div className="space-y-2">
-      <div className="text-[10px] uppercase tracking-wide text-zinc-400">
+      <div className="text-xs uppercase tracking-wide text-zinc-400">
         Per-pair fits ({pairs.length} neighbors)
       </div>
       <table className="w-full text-xs">
-        <thead className="text-[10px] uppercase tracking-wide text-zinc-400">
+        <thead className="text-xs uppercase tracking-wide text-zinc-400">
           <tr>
             <th className="text-left font-normal px-2 py-1">Transmitter</th>
             <th className="text-right font-normal px-2 py-1">True dist</th>
@@ -932,7 +932,7 @@ function PairBreakdown({
           })}
         </tbody>
       </table>
-      <div className="text-[10px] text-zinc-400 leading-relaxed">
+      <div className="text-xs text-zinc-400 leading-relaxed">
         Each row is the absorption that would make this single (listener →
         transmitter) path read accurately. The listener-level absorption
         ({listenerAbsorption.toFixed(2)}) is the median across all pairs.
@@ -968,7 +968,7 @@ function BiasCell({
           ? `${mean >= 0 ? "+" : ""}${formatDistanceDisplay(mean, units)}`
           : "—"}
       </div>
-      <div className="text-[10px] text-zinc-400">
+      <div className="text-xs text-zinc-400">
         {hasData
           ? `±${formatDistanceDisplay(stddev, units)} · ${count.toLocaleString()}`
           : "\u00a0"}
@@ -986,14 +986,14 @@ function SettingPill({
 }) {
   if (value == null) {
     return (
-      <span className="inline-flex items-baseline gap-1 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-900 text-[10px] text-zinc-400 font-mono">
+      <span className="inline-flex items-baseline gap-1 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-900 text-xs text-zinc-400 font-mono">
         <span className="uppercase tracking-wide">{label}</span>
         <span>—</span>
       </span>
     );
   }
   return (
-    <span className="inline-flex items-baseline gap-1 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-900 text-[10px] font-mono">
+    <span className="inline-flex items-baseline gap-1 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-900 text-xs font-mono">
       <span className="uppercase tracking-wide text-zinc-500">{label}</span>
       <span className="text-zinc-900 dark:text-zinc-100">{value}</span>
     </span>
