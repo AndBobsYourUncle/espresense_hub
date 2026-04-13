@@ -25,111 +25,150 @@ const GROUP_COLORS = [
   "#fb7185", // rose-400
 ];
 
-// ─── Geometry helpers ────────────────────────────────────────────────────────
+// ─── Grid-based group boundary ───────────────────────────────────────────────
+//
+// We rasterise every room polygon onto a fine grid, optionally dilate by one
+// cell to bridge small gaps between adjacent rooms, then trace directed
+// boundary edges into closed polygons.  This is the only approach that is
+// fully correct: it works regardless of whether room polygons share exact
+// vertices, and it can never produce lines that pass through a room interior.
 
-function cross(
-  O: readonly [number, number],
-  A: readonly [number, number],
-  B: readonly [number, number],
-): number {
-  return (A[0] - O[0]) * (B[1] - O[1]) - (A[1] - O[1]) * (B[0] - O[0]);
-}
-
-function ptDist(a: readonly [number, number], b: readonly [number, number]): number {
-  return Math.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2);
-}
-
-function convexHull(pts: [number, number][]): [number, number][] {
-  if (pts.length < 3) return pts.slice();
-  const sorted = [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  const lower: [number, number][] = [];
-  for (const p of sorted) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0)
-      lower.pop();
-    lower.push(p);
+function pointInPolygon(
+  px: number,
+  py: number,
+  poly: readonly (readonly number[])[],
+): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1];
+    const xj = poly[j][0], yj = poly[j][1];
+    if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi)
+      inside = !inside;
   }
-  const upper: [number, number][] = [];
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    const p = sorted[i];
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0)
-      upper.pop();
-    upper.push(p);
-  }
-  lower.pop();
-  upper.pop();
-  return [...lower, ...upper];
+  return inside;
 }
+
+type RoomLike = { points?: readonly (readonly number[])[] | null };
 
 /**
- * Concave hull via iterative vertex insertion.
- *
- * Starts from the convex hull, then for every edge longer than `maxEdge`
- * finds the nearest pool vertex that (a) is on the interior side of that
- * edge and (b) produces two sub-edges both shorter than the original edge,
- * inserts it, and repeats until the shape settles.
- *
- * "Interior side" is determined by comparing sign against the hull centroid,
- * making the algorithm winding-order agnostic.
+ * Rasterise `rooms` at `res` metres/cell, dilate by `dilate` cells to bridge
+ * small gaps, then trace the binary boundary into closed polygon paths
+ * (in room-coordinate space).
  */
-function concaveHull(points: [number, number][], maxEdge: number): [number, number][] {
-  if (points.length < 3) return points.slice();
-
-  // Deduplicate input to avoid inserting the same coordinate twice.
-  const seen = new Set<string>();
-  const unique: [number, number][] = [];
-  for (const p of points) {
-    const k = `${p[0]}_${p[1]}`;
-    if (!seen.has(k)) { seen.add(k); unique.push(p); }
+function rasterBoundary(
+  rooms: RoomLike[],
+  res = 0.1,
+  dilate = 1,
+): [number, number][][] {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const room of rooms) {
+    for (const p of room.points ?? []) {
+      x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]);
+      x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]);
+    }
   }
-  if (unique.length < 3) return unique;
+  if (!isFinite(x0)) return [];
 
-  const hull = convexHull(unique);
-  const inHull = new Set(hull.map(p => `${p[0]}_${p[1]}`));
-  const pool = unique.filter(p => !inHull.has(`${p[0]}_${p[1]}`));
+  // Pad so boundary cells are always surrounded by empty cells.
+  const pad = dilate + 1;
+  x0 -= pad * res; y0 -= pad * res;
+  const W = Math.ceil((x1 + pad * res - x0) / res) + 1;
+  const H = Math.ceil((y1 + pad * res - y0) / res) + 1;
 
-  let changed = true;
-  while (changed && pool.length > 0) {
-    changed = false;
-
-    // Centroid of the current hull used to determine which side is interior.
-    const cx = hull.reduce((s, p) => s + p[0], 0) / hull.length;
-    const cy = hull.reduce((s, p) => s + p[1], 0) / hull.length;
-    const cen: [number, number] = [cx, cy];
-
-    for (let i = 0; i < hull.length; i++) {
-      const a = hull[i];
-      const b = hull[(i + 1) % hull.length];
-      const ab = ptDist(a, b);
-      if (ab <= maxEdge) continue;
-
-      const interiorSign = Math.sign(cross(a, b, cen));
-
-      let best: [number, number] | null = null;
-      let bestD = Infinity;
-      for (const p of pool) {
-        // Skip points already absorbed into the hull (shouldn't happen, but safe).
-        if (inHull.has(`${p[0]}_${p[1]}`)) continue;
-        // Must be on the interior side of edge a→b.
-        if (interiorSign !== 0 && Math.sign(cross(a, b, p)) !== interiorSign) continue;
-        // Both sub-edges must be shorter than the original (prevents outward bowing).
-        if (ptDist(a, p) >= ab || ptDist(p, b) >= ab) continue;
-        // Prefer the point nearest the midpoint of the edge.
-        const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
-        const d = Math.sqrt((p[0] - mx) ** 2 + (p[1] - my) ** 2);
-        if (d < bestD) { bestD = d; best = p; }
-      }
-
-      if (best) {
-        hull.splice(i + 1, 0, best);
-        pool.splice(pool.indexOf(best), 1);
-        inHull.add(`${best[0]}_${best[1]}`);
-        changed = true;
-        break; // restart so centroid is recomputed
+  // ── Rasterise ──────────────────────────────────────────────────────────────
+  const raw = new Uint8Array(W * H);
+  for (let r = 0; r < H; r++) {
+    for (let c = 0; c < W; c++) {
+      const px = x0 + (c + 0.5) * res, py = y0 + (r + 0.5) * res;
+      for (const room of rooms) {
+        if (room.points && pointInPolygon(px, py, room.points)) {
+          raw[r * W + c] = 1;
+          break;
+        }
       }
     }
   }
 
-  return hull;
+  // ── Dilate ─────────────────────────────────────────────────────────────────
+  const grid = new Uint8Array(W * H);
+  for (let r = 0; r < H; r++) {
+    for (let c = 0; c < W; c++) {
+      if (raw[r * W + c]) { grid[r * W + c] = 1; continue; }
+      outer: for (let dr = -dilate; dr <= dilate; dr++) {
+        for (let dc = -dilate; dc <= dilate; dc++) {
+          const r2 = r + dr, c2 = c + dc;
+          if (r2 >= 0 && r2 < H && c2 >= 0 && c2 < W && raw[r2 * W + c2]) {
+            grid[r * W + c] = 1; break outer;
+          }
+        }
+      }
+    }
+  }
+
+  const at = (c: number, r: number) =>
+    c >= 0 && c < W && r >= 0 && r < H ? grid[r * W + c] : 0;
+
+  // ── Directed boundary edges ─────────────────────────────────────────────────
+  // Grid corners are integer (col, row) pairs; the corner at (c,r) maps to
+  // room coord (x0 + c*res, y0 + r*res).
+  //
+  // CCW convention (interior on the left of the directed edge):
+  //   horizontal boundary between rows r-1 and r:
+  //     filled-above / empty-below  → edge goes LEFT:  [c+1,r] → [c,r]
+  //     empty-above  / filled-below → edge goes RIGHT: [c,r]   → [c+1,r]
+  //   vertical boundary between cols c-1 and c:
+  //     filled-left / empty-right   → edge goes DOWN:  [c,r]   → [c,r+1]
+  //     empty-left  / filled-right  → edge goes UP:    [c,r+1] → [c,r]
+  const edgeMap = new Map<string, string>(); // "fc,fr" → "tc,tr"
+  const add = (fc: number, fr: number, tc: number, tr: number) =>
+    edgeMap.set(`${fc},${fr}`, `${tc},${tr}`);
+
+  for (let r = 0; r <= H; r++) {
+    for (let c = 0; c < W; c++) {
+      const above = at(c, r - 1), below = at(c, r);
+      if (above && !below) add(c + 1, r, c, r);
+      else if (!above && below) add(c, r, c + 1, r);
+    }
+  }
+  for (let r = 0; r < H; r++) {
+    for (let c = 0; c <= W; c++) {
+      const left = at(c - 1, r), right = at(c, r);
+      if (left && !right) add(c, r, c, r + 1);
+      else if (!left && right) add(c, r + 1, c, r);
+    }
+  }
+
+  // ── Trace chains ───────────────────────────────────────────────────────────
+  const visited = new Set<string>();
+  const polygons: [number, number][][] = [];
+
+  for (const startKey of edgeMap.keys()) {
+    if (visited.has(startKey)) continue;
+    const poly: [number, number][] = [];
+    let key = startKey;
+    while (!visited.has(key) && edgeMap.has(key)) {
+      visited.add(key);
+      const comma = key.indexOf(",");
+      const col = +key.slice(0, comma), row = +key.slice(comma + 1);
+      // Remove collinear point: check if previous, this, and next are colinear.
+      // (We defer this check to after the loop since we don't have "next" yet.)
+      poly.push([x0 + col * res, y0 + row * res]);
+      key = edgeMap.get(key)!;
+    }
+    if (poly.length >= 4) {
+      // Remove collinear points (consecutive edges in the same direction).
+      const simplified: [number, number][] = [];
+      const n = poly.length;
+      for (let i = 0; i < n; i++) {
+        const a = poly[(i - 1 + n) % n], b = poly[i], c = poly[(i + 1) % n];
+        const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+        if (Math.abs(cross) > 1e-9) simplified.push(b);
+      }
+      if (simplified.length >= 4) polygons.push(simplified);
+    }
+  }
+
+  return polygons;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -174,10 +213,10 @@ export default function RoomOverlay({ floor, transform }: Props) {
     return m;
   }, [floor.rooms]);
 
-  // Concave hull per floor_area group, in SVG coordinates.
-  // Collects all room polygon vertices for the group, deduplicates them, then
-  // shrink-wraps them to a tight boundary that follows the actual room shapes.
-  const groupHulls = useMemo(() => {
+  // Raster boundary per floor_area group, as SVG point-string arrays.
+  // Each group may produce more than one closed polygon (e.g. if two sub-sets
+  // of group rooms are not physically adjacent).
+  const groupBoundaries = useMemo(() => {
     const groupRooms = new Map<string, typeof floor.rooms>();
     for (const room of floor.rooms) {
       if (!room.floor_area || !room.points || room.points.length < 3) continue;
@@ -187,18 +226,15 @@ export default function RoomOverlay({ floor, transform }: Props) {
     }
 
     return [...groupRooms.entries()].map(([tag, rooms]) => {
-      const all: [number, number][] = [];
-      for (const room of rooms) {
-        for (const p of room.points!) all.push([p[0], p[1]]);
-      }
-
-      // maxEdge 1.5 m — edges shorter than this won't be subdivided, so the
-      // hull bridges small gaps while still capturing room-scale concavities.
-      const hull = concaveHull(all, 1.5);
-      const svgPts = hull
-        .map(([x, y]) => `${tx(transform, x)},${ty(transform, y)}`)
-        .join(" ");
-      return { tag, svgPts, color: groupColorMap.get(tag) ?? GROUP_COLORS[0] };
+      const polys = rasterBoundary(rooms as RoomLike[]);
+      const color = groupColorMap.get(tag) ?? GROUP_COLORS[0];
+      return {
+        tag,
+        color,
+        svgPolys: polys.map((poly) =>
+          poly.map(([x, y]) => `${tx(transform, x)},${ty(transform, y)}`).join(" "),
+        ),
+      };
     });
   }, [floor.rooms, groupColorMap, transform]);
 
@@ -236,15 +272,15 @@ export default function RoomOverlay({ floor, transform }: Props) {
 
       <g className="room-overlay" style={{ cursor: isRelationsMode || isZonesMode ? "pointer" : "default" }}>
 
-        {/* ── Floor-area group hulls (relations mode only) ─────────────────── */}
+        {/* ── Floor-area group boundaries (relations mode only) ─────────────── */}
         {isRelationsMode && (
           <g style={{ pointerEvents: "none" }}>
-            {groupHulls.map(({ tag, svgPts, color }) => {
+            {groupBoundaries.map(({ tag, color, svgPolys }) => {
               const isActiveGroup = activeDraftGroup !== "" && tag === activeDraftGroup;
-              return (
+              return svgPolys.map((pts, i) => (
                 <polygon
-                  key={`hull-${tag}`}
-                  points={svgPts}
+                  key={`boundary-${tag}-${i}`}
+                  points={pts}
                   fill={isActiveGroup ? color : "none"}
                   fillOpacity={isActiveGroup ? 0.12 : 0}
                   stroke={color}
@@ -252,7 +288,7 @@ export default function RoomOverlay({ floor, transform }: Props) {
                   strokeDasharray="0.18 0.1"
                   strokeLinejoin="round"
                 />
-              );
+              ));
             })}
           </g>
         )}
