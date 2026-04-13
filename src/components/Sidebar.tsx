@@ -131,9 +131,11 @@ export default function Sidebar() {
           }
         }}
       >
-      <div className="h-16 shrink-0 flex items-center gap-2 px-5 border-b border-zinc-200 dark:border-zinc-800">
-        <Radio className="h-5 w-5 text-blue-500" />
-        <span className="font-semibold tracking-tight">ESPresense Hub</span>
+      <div className="h-16 max-lg:landscape:h-11 shrink-0 flex items-center gap-2 px-5 max-lg:landscape:px-3 border-b border-zinc-200 dark:border-zinc-800">
+        <Radio className="h-5 w-5 max-lg:landscape:h-4 max-lg:landscape:w-4 text-blue-500 shrink-0" />
+        <span className="font-semibold tracking-tight max-lg:landscape:text-sm truncate">
+          ESPresense Hub
+        </span>
       </div>
       <nav className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1">
         {navItems.map(({ href, label, icon: Icon }) => {
