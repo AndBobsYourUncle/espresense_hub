@@ -25,23 +25,6 @@ const GROUP_COLORS = [
   "#fb7185", // rose-400
 ];
 
-// ─── Point-in-polygon (ray casting) ─────────────────────────────────────────
-
-function pointInPolygon(
-  px: number,
-  py: number,
-  poly: readonly (readonly number[])[],
-): boolean {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const xi = poly[i][0], yi = poly[i][1];
-    const xj = poly[j][0], yj = poly[j][1];
-    if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi)
-      inside = !inside;
-  }
-  return inside;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function RoomOverlay({ floor, transform }: Props) {
@@ -84,8 +67,15 @@ export default function RoomOverlay({ floor, transform }: Props) {
     return m;
   }, [floor.rooms]);
 
-  // Outer boundary edges per floor_area group — edges whose midpoint does not
-  // lie inside any sibling room (i.e. they face outward).
+  // Outer boundary edges per floor_area group.
+  //
+  // Strategy: collect every directed edge (A→B) from every room in the group,
+  // then discard any edge whose reverse (B→A) also appears in the collection.
+  // A matching reverse means two group-rooms share that wall; no reverse means
+  // the edge faces outward and should be drawn.
+  //
+  // This is purely topological — no point-in-polygon probing — so it is exact
+  // for rooms that share vertices and robust for small coordinate gaps (EPS).
   const groupOuterEdges = useMemo(() => {
     const groupRooms = new Map<string, typeof floor.rooms>();
     for (const room of floor.rooms) {
@@ -95,47 +85,39 @@ export default function RoomOverlay({ floor, transform }: Props) {
       groupRooms.set(room.floor_area, arr);
     }
 
+    // Tolerance for treating two coordinates as equal (metres).
+    const EPS = 0.05;
+    const near = (a: number, b: number) => Math.abs(a - b) < EPS;
+
     return [...groupRooms.entries()].map(([tag, rooms]) => {
-      const edges: { x1: number; y1: number; x2: number; y2: number }[] = [];
+      // Gather all directed edges: [ax, ay, bx, by]
+      type E = [number, number, number, number];
+      const all: E[] = [];
       for (const room of rooms) {
         const pts = room.points!;
         for (let i = 0; i < pts.length; i++) {
-          const a = pts[i];
-          const b = pts[(i + 1) % pts.length];
-          const mx = (a[0] + b[0]) / 2;
-          const my = (a[1] + b[1]) / 2;
-          // Compute the outward-facing perpendicular by comparing against the
-          // room centroid — we only probe in the outward direction.  Testing
-          // both sides is wrong: on narrow rooms the inward probe crosses the
-          // room and lands inside a sibling on the far wall, incorrectly
-          // suppressing exterior edges.
-          const edgeLen = Math.sqrt((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2);
-          if (edgeLen < 1e-9) continue;
-          const px = -(b[1] - a[1]) / edgeLen; // one perpendicular unit dir
-          const py =  (b[0] - a[0]) / edgeLen;
-          const [cx, cy] = polygonCentroid(pts as [number, number][]);
-          // centroid should be on the inward side; flip to get outward
-          const inward = (cx - mx) * px + (cy - my) * py > 0;
-          const outx = inward ? -px : px;
-          const outy = inward ? -py : py;
-          const TOL = 0.08; // metres — bridges shared walls and small gaps
-          const interior = rooms.some(
-            (other) =>
-              other !== room &&
-              other.points != null &&
-              pointInPolygon(mx + outx * TOL, my + outy * TOL, other.points),
-          );
-          if (!interior) {
-            edges.push({
-              x1: tx(transform, a[0]),
-              y1: ty(transform, a[1]),
-              x2: tx(transform, b[0]),
-              y2: ty(transform, b[1]),
-            });
-          }
+          const a = pts[i], b = pts[(i + 1) % pts.length];
+          all.push([a[0], a[1], b[0], b[1]]);
         }
       }
-      return { tag, color: groupColorMap.get(tag) ?? GROUP_COLORS[0], edges };
+
+      // Keep edges whose reverse direction (B→A) does not exist.
+      const outer = all.filter(
+        ([ax, ay, bx, by]) =>
+          !all.some(
+            ([ax2, ay2, bx2, by2]) =>
+              near(ax, bx2) && near(ay, by2) && near(bx, ax2) && near(by, ay2),
+          ),
+      );
+
+      return {
+        tag,
+        color: groupColorMap.get(tag) ?? GROUP_COLORS[0],
+        edges: outer.map(([ax, ay, bx, by]) => ({
+          x1: tx(transform, ax), y1: ty(transform, ay),
+          x2: tx(transform, bx), y2: ty(transform, by),
+        })),
+      };
     });
   }, [floor.rooms, groupColorMap, transform]);
 
