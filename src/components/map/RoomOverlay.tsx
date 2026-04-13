@@ -16,6 +16,49 @@ const ARROW_COLOR = "#14b8a6";
 const ARROW_STROKE = 0.05;
 const MARKER_ID = "room-conn-arrow";
 
+// Door arrow geometry (metres): shaft starts this far inside the editing room
+// and ends this far into the connected room, perpendicular to the wall.
+const DOOR_INSIDE  = 0.28;
+const DOOR_OUTSIDE = 0.12;
+
+/**
+ * Return the outward unit normal of the edge of `points` that is nearest to
+ * `(doorX, doorY)`, oriented toward `(facingX, facingY)`.
+ */
+function wallNormalAt(
+  doorX: number,
+  doorY: number,
+  points: readonly (readonly number[])[],
+  facingX: number,
+  facingY: number,
+): { nx: number; ny: number } | null {
+  const n = points.length;
+  if (n < 2) return null;
+  let bestDist = Infinity;
+  let best: { nx: number; ny: number } | null = null;
+  for (let i = 0; i < n; i++) {
+    const ax = points[i][0], ay = points[i][1];
+    const bx = points[(i + 1) % n][0], by = points[(i + 1) % n][1];
+    const edgeDx = bx - ax, edgeDy = by - ay;
+    const len2 = edgeDx * edgeDx + edgeDy * edgeDy;
+    let px: number, py: number;
+    if (len2 < 1e-12) { px = ax; py = ay; }
+    else {
+      const t = Math.max(0, Math.min(1, ((doorX - ax) * edgeDx + (doorY - ay) * edgeDy) / len2));
+      px = ax + t * edgeDx; py = ay + t * edgeDy;
+    }
+    const dist = Math.hypot(doorX - px, doorY - py);
+    if (dist < bestDist) {
+      bestDist = dist;
+      const el = Math.sqrt(len2) || 1;
+      const perpX = edgeDy / el, perpY = -edgeDx / el;
+      const dot = perpX * (facingX - px) + perpY * (facingY - py);
+      best = { nx: dot >= 0 ? perpX : -perpX, ny: dot >= 0 ? perpY : -perpY };
+    }
+  }
+  return best;
+}
+
 export const GROUP_COLORS = [
   "#f59e0b", // amber-500
   "#ec4899", // pink-500
@@ -432,21 +475,54 @@ export default function RoomOverlay({ floor, transform }: Props) {
         })}
 
         {/* ── Connection arrows ─────────────────────────────────────────────── */}
-        {/* When a door is placed, the arrow starts from the door position on the
-            wall instead of the editing room's centroid. */}
+        {/* Without a door: centroid→centroid arrow as usual.
+            With a door: short arrow perpendicular to the wall, starting inside
+            the editing room and ending just inside the connected room. */}
         {isRelationsMode &&
           selectedEntry &&
           relations.draftOpenTo.map((connId) => {
             const connEntry = roomPolygons.find((e) => e?.room.id === connId);
             if (!connEntry) return null;
             const door = relations.draftDoors[connId];
-            const x1 = door ? tx(transform, door[0]) : selectedEntry.sx;
-            const y1 = door ? ty(transform, door[1]) : selectedEntry.sy;
+
+            if (door && selectedEntry.room.points) {
+              const [doorX, doorY] = door;
+              const connCentroid = connEntry.room.points
+                ? polygonCentroid(connEntry.room.points)
+                : null;
+              const normal = connCentroid
+                ? wallNormalAt(doorX, doorY, selectedEntry.room.points, connCentroid[0], connCentroid[1])
+                : null;
+
+              if (normal) {
+                const sx = tx(transform, doorX);
+                const sy = ty(transform, doorY);
+                // Normal may need sign-flipping for SVG axes.
+                const snx = transform.flipX ? -normal.nx : normal.nx;
+                const sny = transform.flipY ? -normal.ny : normal.ny;
+                return (
+                  <line
+                    key={`conn-${connId}`}
+                    x1={sx - snx * DOOR_INSIDE}
+                    y1={sy - sny * DOOR_INSIDE}
+                    x2={sx + snx * DOOR_OUTSIDE}
+                    y2={sy + sny * DOOR_OUTSIDE}
+                    stroke={ARROW_COLOR}
+                    strokeWidth={ARROW_STROKE}
+                    strokeLinecap="round"
+                    markerEnd={`url(#${MARKER_ID})`}
+                    style={{ pointerEvents: "none" }}
+                  />
+                );
+              }
+            }
+
+            // Fallback: centroid-to-centroid
             return (
               <line
                 key={`conn-${connId}`}
-                x1={x1}
-                y1={y1}
+                x1={selectedEntry.sx}
+                y1={selectedEntry.sy}
                 x2={connEntry.sx}
                 y2={connEntry.sy}
                 stroke={ARROW_COLOR}
