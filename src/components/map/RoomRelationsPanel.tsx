@@ -4,6 +4,9 @@ import { useMemo } from "react";
 import { Crosshair, Network, Save, X } from "lucide-react";
 import { useDraggable } from "@/lib/hooks/useDraggable";
 import type { Floor } from "@/lib/config";
+import { formatDistanceDisplay } from "@/lib/units";
+import DistanceInput from "@/components/DistanceInput";
+import { useUnits } from "@/components/UnitsProvider";
 import { useMapTool } from "./MapToolProvider";
 import { useRoomRelations } from "./RoomRelationsProvider";
 
@@ -78,6 +81,7 @@ export default function RoomRelationsPanel({ floor }: Props) {
     cancel,
   } = useRoomRelations();
 
+  const { units } = useUnits();
   const { pos, handlers } = useDraggable({ x: 0, y: 0 });
 
   // Collect unique floor_area tags from all rooms on this floor so the
@@ -282,53 +286,35 @@ export default function RoomRelationsPanel({ floor }: Props) {
                         {/* Distance from corner A (edge start) */}
                         <div>
                           <div className="text-[10px] text-zinc-400 mb-0.5">From corner A</div>
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="number"
-                              value={doorEdge.distFromA.toFixed(2)}
-                              step="0.01"
-                              min={0}
-                              max={doorEdge.wallLength.toFixed(2)}
-                              onChange={(e) => {
-                                const raw = parseFloat(e.target.value);
-                                if (isNaN(raw)) return;
-                                const d = Math.max(0, Math.min(doorEdge.wallLength, raw));
-                                const t = d / doorEdge.wallLength;
-                                const [ax, ay] = doorEdge.cornerA;
-                                const [bx, by] = doorEdge.cornerB;
-                                setDoor(rid, [ax + t * (bx - ax), ay + t * (by - ay)]);
-                              }}
-                              className="w-full h-7 px-2 text-xs bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md text-zinc-900 dark:text-zinc-100 text-right tabular-nums"
-                            />
-                            <span className="text-[10px] text-zinc-400 shrink-0">m</span>
-                          </div>
+                          <DistanceInput
+                            valueMeters={doorEdge.distFromA}
+                            onChangeMeters={(d) => {
+                              const clamped = Math.max(0, Math.min(doorEdge.wallLength, d));
+                              const t = clamped / doorEdge.wallLength;
+                              const [ax, ay] = doorEdge.cornerA;
+                              const [bx, by] = doorEdge.cornerB;
+                              setDoor(rid, [ax + t * (bx - ax), ay + t * (by - ay)]);
+                            }}
+                            className="w-full h-7 px-2 text-xs font-mono bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md text-zinc-900 dark:text-zinc-100 text-right tabular-nums"
+                          />
                         </div>
                         {/* Distance from corner B (edge end) */}
                         <div>
                           <div className="text-[10px] text-zinc-400 mb-0.5">From corner B</div>
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="number"
-                              value={(doorEdge.wallLength - doorEdge.distFromA).toFixed(2)}
-                              step="0.01"
-                              min={0}
-                              max={doorEdge.wallLength.toFixed(2)}
-                              onChange={(e) => {
-                                const raw = parseFloat(e.target.value);
-                                if (isNaN(raw)) return;
-                                const d = Math.max(0, Math.min(doorEdge.wallLength, raw));
-                                const t = (doorEdge.wallLength - d) / doorEdge.wallLength;
-                                const [ax, ay] = doorEdge.cornerA;
-                                const [bx, by] = doorEdge.cornerB;
-                                setDoor(rid, [ax + t * (bx - ax), ay + t * (by - ay)]);
-                              }}
-                              className="w-full h-7 px-2 text-xs bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md text-zinc-900 dark:text-zinc-100 text-right tabular-nums"
-                            />
-                            <span className="text-[10px] text-zinc-400 shrink-0">m</span>
-                          </div>
+                          <DistanceInput
+                            valueMeters={doorEdge.wallLength - doorEdge.distFromA}
+                            onChangeMeters={(d) => {
+                              const clamped = Math.max(0, Math.min(doorEdge.wallLength, d));
+                              const t = (doorEdge.wallLength - clamped) / doorEdge.wallLength;
+                              const [ax, ay] = doorEdge.cornerA;
+                              const [bx, by] = doorEdge.cornerB;
+                              setDoor(rid, [ax + t * (bx - ax), ay + t * (by - ay)]);
+                            }}
+                            className="w-full h-7 px-2 text-xs font-mono bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md text-zinc-900 dark:text-zinc-100 text-right tabular-nums"
+                          />
                         </div>
                         <div className="col-span-2 text-[10px] text-zinc-400 text-right">
-                          Wall: {doorEdge.wallLength.toFixed(2)} m total
+                          Wall: {formatDistanceDisplay(doorEdge.wallLength, units)} total
                         </div>
                       </div>
                     )}

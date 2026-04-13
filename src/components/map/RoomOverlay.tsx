@@ -17,7 +17,7 @@ const ARROW_STROKE = 0.05;
 const MARKER_ID = "room-conn-arrow";
 
 // Door swing arc geometry (metres).
-const DOOR_WIDTH   = 0.9;   // door leaf width (radius of swing arc)
+const DOOR_WIDTH   = 0.8;   // door leaf width (radius of swing arc) — ~32" / 0.81 m interior standard
 const DOOR_STROKE_W = 0.04; // stroke width for door leaf and arc
 
 /**
