@@ -293,15 +293,15 @@ export default function CalibrationPageClient() {
                   <tr>
                     <Th>Node</Th>
                     <Th>Settings</Th>
-                    <Th className="text-right">
+                    <Th className="text-right whitespace-nowrap">
                       GT bias
-                      <div className="text-xs normal-case font-normal text-zinc-400">
+                      <div className="text-xs normal-case font-normal tracking-normal text-zinc-400 whitespace-nowrap">
                         node→node
                       </div>
                     </Th>
-                    <Th className="text-right">
+                    <Th className="text-right whitespace-nowrap">
                       LOO bias
-                      <div className="text-xs normal-case font-normal text-zinc-400">
+                      <div className="text-xs normal-case font-normal tracking-normal text-zinc-400 whitespace-nowrap">
                         leave-one-out
                       </div>
                     </Th>
