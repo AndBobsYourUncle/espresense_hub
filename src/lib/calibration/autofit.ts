@@ -89,6 +89,33 @@ const RECENCY_TAU_MS = 60 * 60 * 1000; // 1 hour
 /** Minimum effective weighted sample count before we publish a fit. */
 const MIN_EFFECTIVE_SAMPLES = 5;
 
+/**
+ * Defensive ceiling on streaming weight. The exponential decay should
+ * keep W bounded in steady state (~τ × arrival_rate), but a
+ * pathological case (clock skew, dt=0 same-millisecond bursts that
+ * skip decay, or someone tweaking RECENCY_TAU_MS without thinking)
+ * could let it grow unboundedly. When W crosses this cap, scale all
+ * sums down by the same factor — preserves mean/variance exactly,
+ * just keeps magnitudes from drifting into precision-loss territory.
+ */
+const MAX_W = 10_000;
+
+function clampStats(
+  stats: { W: number } & Record<string, number | undefined>,
+  fields: ReadonlyArray<string>,
+): void {
+  if (stats.W <= MAX_W) return;
+  const factor = MAX_W / stats.W;
+  stats.W = MAX_W;
+  for (const f of fields) {
+    const v = stats[f];
+    if (typeof v === "number") stats[f] = v * factor;
+  }
+}
+
+const PAIR_STATS_FIELDS = ["SumN", "SumN2"] as const;
+const LOGLOG_STATS_FIELDS = ["Sx", "Sy", "Sxx", "Sxy", "Syy"] as const;
+
 /** Distances below this make log() numerically unstable. */
 const MIN_TRUE_DIST = 1.0;
 
@@ -166,6 +193,7 @@ export function addSampleToPairStats(
   stats.W += 1;
   stats.SumN += n;
   stats.SumN2 += n * n;
+  clampStats(stats as unknown as { W: number } & Record<string, number | undefined>, PAIR_STATS_FIELDS);
 }
 
 /**
@@ -259,6 +287,7 @@ export function addSampleToStats(
   stats.Sxx += x * x;
   stats.Sxy += x * y;
   stats.Syy += y * y;
+  clampStats(stats as unknown as { W: number } & Record<string, number | undefined>, LOGLOG_STATS_FIELDS);
 }
 
 /**

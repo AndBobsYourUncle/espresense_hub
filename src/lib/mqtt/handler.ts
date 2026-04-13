@@ -17,62 +17,40 @@ import {
 } from "@/lib/state/store";
 
 /**
- * Speed (m/s) below which the Kalman filter's velocity estimate is
- * considered "stationary". The filter typically reads ~0.02–0.05 m/s
- * for a truly motionless device and 0.5+ m/s for a walking person,
- * so 0.15 m/s is well inside the safe gap.
+ * Maximum distance (meters, 2D) between the device's current Kalman
+ * position and the active pin's anchor before we consider the device
+ * "at" the pin. Generous (3 m) because position estimates are noisy
+ * — typical room-scale uncertainty plus pin-placement slop. Big
+ * enough to cover the user setting a pin "by the bed" and standing
+ * near it, or a watch sitting on a desk while RSSI ghosts push the
+ * fix around by a meter or two. Small enough to refuse "at my desk
+ * in the next room".
  */
-const STATIONARY_SPEED_THRESHOLD = 0.15;
+const PIN_PROXIMITY_THRESHOLD_M = 3;
 
 /**
- * Fallback per-node distance-variance threshold (m²), used only when
- * Kalman state isn't available yet (first few seconds after the
- * device shows up). 3.0 m² ≈ 1.7 m std dev — generous enough to
- * tolerate body-shadow micro-jitter from a stationary worn wearable
- * but small enough to catch actual walking.
- */
-const STATIONARY_VARIANCE_THRESHOLD = 3.0;
-
-/**
- * Decide whether the device is currently stationary near its active
- * pin (if any). Two signals, in priority order:
+ * Is the device close enough to its active pin's anchor to credibly
+ * be the source of these samples? Compares the latest Kalman position
+ * to the pin's stored position in 2D (Z is ignored — pin Z reflects
+ * floor coordinates, device Z is wherever the locator put it).
  *
- *   1. **Kalman velocity** — the filtered velocity component is the
- *      cleanest signal we have. If |v| < threshold, the device isn't
- *      moving regardless of how noisy individual node distances look.
- *      RSSI variance from body-shadow micro-movements doesn't fool it.
- *   2. **Per-node distance variance** — fallback for the brief window
- *      after a device first appears, before the Kalman has converged.
- *      Uses a generous threshold (3.0 m²) since stationary worn
- *      wearables routinely generate 1–2 m of distance jitter per node
- *      that has nothing to do with motion.
+ * Returns true if no Kalman position is available yet — we trust the
+ * user's pin placement until we have evidence otherwise.
+ *
+ * Used as both the accumulation gate AND the deactivation trigger:
+ * proximity is a more honest "is the device here?" signal than any
+ * velocity threshold, which gets fooled by RSSI-driven phantom
+ * motion in the Kalman state.
  */
-function isDeviceStationary(
-  device: { kalman?: { x: number[] }; measurements: Map<string, { distanceVariance?: number; lastSeen: number }> },
-  cutoffMs: number,
+function isNearPin(
+  device: { kalman?: { x: number[] } },
+  pin: { position: readonly [number, number, number] },
 ): boolean {
-  // Primary: Kalman speed. State [x, y, z, vx, vy, vz] — speed is the
-  // 3D magnitude of the velocity components.
-  if (device.kalman?.x && device.kalman.x.length >= 6) {
-    const vx = device.kalman.x[3];
-    const vy = device.kalman.x[4];
-    const vz = device.kalman.x[5];
-    const speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
-    return speed < STATIONARY_SPEED_THRESHOLD;
-  }
-
-  // Fallback: variance, with a more lenient threshold than before.
-  let count = 0;
-  let sumVar = 0;
-  for (const m of device.measurements.values()) {
-    if (m.lastSeen < cutoffMs) continue;
-    if (m.distanceVariance == null) continue;
-    sumVar += m.distanceVariance;
-    count += 1;
-  }
-  if (count < 3) return false;
-  const meanVar = sumVar / count;
-  return meanVar < STATIONARY_VARIANCE_THRESHOLD;
+  const k = device.kalman?.x;
+  if (!k || k.length < 3) return true;
+  const dx = k[0] - pin.position[0];
+  const dy = k[1] - pin.position[1];
+  return Math.sqrt(dx * dx + dy * dy) <= PIN_PROXIMITY_THRESHOLD_M;
 }
 import {
   DeviceMessageSchema,
@@ -275,8 +253,17 @@ export function attachHandlers(client: MqttClient, config: Config): void {
       // produces a much tighter bias estimate than any single snapshot.
       const activePin = getActivePin(store, device.id);
       if (activePin && normalized.distance != null) {
-        const cutoff = Date.now() - staleAfterMs;
-        if (isDeviceStationary(device, cutoff)) {
+        // Proximity is the primary deactivation signal. The user
+        // placed this pin to assert "device is here" — as long as
+        // it stays within a generous radius, we accumulate samples.
+        // Walking away takes the device clearly outside the radius
+        // and triggers deactivation. RSSI-driven phantom velocity
+        // *within* the radius is exactly what we want to average out
+        // via accumulation, not be afraid of, so we no longer use
+        // Kalman speed as a trigger here.
+        const nearPin = isNearPin(device, activePin);
+
+        if (nearPin) {
           accumulatePinSample(
             store,
             activePin,
@@ -287,11 +274,11 @@ export function attachHandlers(client: MqttClient, config: Config): void {
               normalized.distance,
           );
         } else {
-          // Motion detected — auto-deactivate the pin. The user can
-          // re-click the pin (or place a new one) when stationary again.
+          // Device has clearly left the pin's vicinity — deactivate.
+          // The user can re-pin or re-activate when settled again.
           deactivatePin(store, device.id, activePin.timestamp);
           console.log(
-            `[pin] auto-deactivated ${device.id}'s active pin (motion detected)`,
+            `[pin] auto-deactivated ${device.id}'s active pin (left proximity)`,
           );
         }
       }
