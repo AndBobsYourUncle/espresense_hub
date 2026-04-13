@@ -351,6 +351,60 @@ export class Store {
       d.kalman = undefined;
       return;
     }
+
+    // While a pin is active, bypass the position filter entirely and
+    // lock the displayed position to the pin's anchor. The user has
+    // explicitly asserted "device is here" — that's ground truth, more
+    // reliable than any sensor-derived estimate, and crucially it
+    // *protects bias learning* from a feedback loop:
+    //
+    //   1. Without this, Kalman would integrate the as-yet-uncalibrated
+    //      locator output every message, drifting position away from
+    //      the pin within seconds.
+    //   2. The proximity check would then deactivate the pin before
+    //      bias accumulation got past a handful of samples — the very
+    //      situation pins exist to fix.
+    //   3. Re-snapping the Kalman state every cycle keeps it clean for
+    //      whenever the pin is later deactivated; no jump back to a
+    //      stale estimate.
+    //
+    // The handler still uses the raw (pre-lock) locator result for its
+    // own "device clearly walked away" check, so a real cross-house
+    // move still triggers deactivation.
+    let activePin: DeviceGroundTruthPin | undefined;
+    const pins = this.devicePins.get(deviceId);
+    if (pins) {
+      const now = position.computedAt;
+      for (const p of pins) {
+        if (p.activeUntilMs > now) {
+          activePin = p;
+          break;
+        }
+      }
+    }
+    if (activePin) {
+      const px = activePin.position[0];
+      const py = activePin.position[1];
+      const pz = activePin.position[2];
+      // Re-snap Kalman state every cycle so it stays aligned with the
+      // pin and doesn't accumulate a phantom velocity from rejected
+      // measurements while locked.
+      d.kalman = {
+        x: [px, py, pz, 0, 0, 0],
+        P: d.kalman?.P ?? new Array(36).fill(0),
+        lastMs: position.computedAt,
+      };
+      d.position = {
+        ...position,
+        x: px,
+        y: py,
+        z: pz,
+        confidence: 1,
+        algorithm: "pin_anchored",
+      };
+      return;
+    }
+
     // Apply the active position filter. Kalman filter is the default —
     // tracks position AND velocity so motion is followed without lag,
     // while stationary devices still benefit from measurement noise

@@ -17,40 +17,40 @@ import {
 } from "@/lib/state/store";
 
 /**
- * Maximum distance (meters, 2D) between the device's current Kalman
- * position and the active pin's anchor before we consider the device
- * "at" the pin. Generous (3 m) because position estimates are noisy
- * — typical room-scale uncertainty plus pin-placement slop. Big
- * enough to cover the user setting a pin "by the bed" and standing
- * near it, or a watch sitting on a desk while RSSI ghosts push the
- * fix around by a meter or two. Small enough to refuse "at my desk
- * in the next room".
+ * Maximum distance (meters, 2D) between the *raw* locator output and
+ * the active pin's anchor before we consider the device to have
+ * walked away.
+ *
+ * Generous (8 m) because the raw locator output during pin learning
+ * is intentionally noisy — bias hasn't converged yet, and the whole
+ * point of the pin is to absorb that noise into accumulated bias.
+ * 8 m is comfortably bigger than typical room-scale uncertainty plus
+ * pin-placement slop, but small enough to detect "user crossed the
+ * house with the device on them".
+ *
+ * NB: this checks the raw locator output, NOT the Kalman state. The
+ * Kalman state is locked to the pin while active (see
+ * `Store.setDevicePosition`), so it would always pass the test.
  */
-const PIN_PROXIMITY_THRESHOLD_M = 3;
+const PIN_FAR_AWAY_THRESHOLD_M = 8;
 
 /**
- * Is the device close enough to its active pin's anchor to credibly
- * be the source of these samples? Compares the latest Kalman position
- * to the pin's stored position in 2D (Z is ignored — pin Z reflects
- * floor coordinates, device Z is wherever the locator put it).
+ * Is the raw locator output close enough to the pin's anchor to
+ * credibly be the source of these samples? Compares the locator
+ * result (pre-Kalman, pre-pin-lock) to the pin's stored position
+ * in 2D.
  *
- * Returns true if no Kalman position is available yet — we trust the
+ * Returns true if there's no locator result yet — we trust the
  * user's pin placement until we have evidence otherwise.
- *
- * Used as both the accumulation gate AND the deactivation trigger:
- * proximity is a more honest "is the device here?" signal than any
- * velocity threshold, which gets fooled by RSSI-driven phantom
- * motion in the Kalman state.
  */
 function isNearPin(
-  device: { kalman?: { x: number[] } },
+  rawPosition: { x: number; y: number } | null | undefined,
   pin: { position: readonly [number, number, number] },
 ): boolean {
-  const k = device.kalman?.x;
-  if (!k || k.length < 3) return true;
-  const dx = k[0] - pin.position[0];
-  const dy = k[1] - pin.position[1];
-  return Math.sqrt(dx * dx + dy * dy) <= PIN_PROXIMITY_THRESHOLD_M;
+  if (!rawPosition) return true;
+  const dx = rawPosition.x - pin.position[0];
+  const dy = rawPosition.y - pin.position[1];
+  return Math.sqrt(dx * dx + dy * dy) <= PIN_FAR_AWAY_THRESHOLD_M;
 }
 import {
   DeviceMessageSchema,
@@ -247,23 +247,22 @@ export function attachHandlers(client: MqttClient, config: Config): void {
         normalized,
       );
 
-      // If the user has marked a pin "active" for this device AND the
-      // device is currently stationary, accumulate this measurement
-      // into the pin's per-node bias statistics. Over time this
-      // produces a much tighter bias estimate than any single snapshot.
+      // Recompute position from the latest set of fixes. Cheap for typical
+      // home setups (a dozen nodes) so we just do it inline on every message.
+      const result = computeDevicePosition(
+        device,
+        store.nodeIndex,
+        locator,
+        staleAfterMs,
+      );
+
+      // Pin gating happens AFTER computeDevicePosition (so we have the
+      // raw locator output to compare against the pin) but BEFORE
+      // setDevicePosition (which locks position to the pin if active,
+      // making the post-lock position useless for proximity checks).
       const activePin = getActivePin(store, device.id);
       if (activePin && normalized.distance != null) {
-        // Proximity is the primary deactivation signal. The user
-        // placed this pin to assert "device is here" — as long as
-        // it stays within a generous radius, we accumulate samples.
-        // Walking away takes the device clearly outside the radius
-        // and triggers deactivation. RSSI-driven phantom velocity
-        // *within* the radius is exactly what we want to average out
-        // via accumulation, not be afraid of, so we no longer use
-        // Kalman speed as a trigger here.
-        const nearPin = isNearPin(device, activePin);
-
-        if (nearPin) {
+        if (isNearPin(result, activePin)) {
           accumulatePinSample(
             store,
             activePin,
@@ -274,23 +273,14 @@ export function attachHandlers(client: MqttClient, config: Config): void {
               normalized.distance,
           );
         } else {
-          // Device has clearly left the pin's vicinity — deactivate.
-          // The user can re-pin or re-activate when settled again.
+          // Raw locator clearly puts the device elsewhere — user has
+          // walked away with it. Deactivate.
           deactivatePin(store, device.id, activePin.timestamp);
           console.log(
             `[pin] auto-deactivated ${device.id}'s active pin (left proximity)`,
           );
         }
       }
-
-      // Recompute position from the latest set of fixes. Cheap for typical
-      // home setups (a dozen nodes) so we just do it inline on every message.
-      const result = computeDevicePosition(
-        device,
-        store.nodeIndex,
-        locator,
-        staleAfterMs,
-      );
       if (result) {
         // Compute every alternative locator's result so the comparison
         // view can show all of them as ghost markers. Each alt is a
