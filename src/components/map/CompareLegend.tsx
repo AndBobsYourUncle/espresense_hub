@@ -56,7 +56,7 @@ export default function CompareLegend() {
   return (
     <div
       onClick={(e) => e.stopPropagation()}
-      className="absolute bottom-4 right-4 z-10 rounded-lg bg-white/95 dark:bg-zinc-950/95 backdrop-blur border border-zinc-200 dark:border-zinc-800 shadow-sm p-2.5 min-w-[180px]"
+      className="absolute bottom-4 right-4 z-10 rounded-lg bg-white/95 dark:bg-zinc-950/95 backdrop-blur border border-zinc-200 dark:border-zinc-800 shadow-sm p-2.5 max-w-[calc(100%-2rem)] sm:max-w-none w-auto sm:min-w-[180px]"
       aria-label="Locator legend"
     >
       <div className="text-xs uppercase tracking-wider font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5">

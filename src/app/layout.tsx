@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import MobileNavProvider from "@/components/MobileNavProvider";
 import Sidebar from "@/components/Sidebar";
 import UnitsProvider from "@/components/UnitsProvider";
 import "./globals.css";
@@ -31,10 +32,12 @@ export default function RootLayout({
     >
       <body className="h-full flex">
         <UnitsProvider>
-          <Sidebar />
-          <div className="flex-1 flex flex-col min-w-0 min-h-0">
-            {children}
-          </div>
+          <MobileNavProvider>
+            <Sidebar />
+            <div className="flex-1 flex flex-col min-w-0 min-h-0">
+              {children}
+            </div>
+          </MobileNavProvider>
         </UnitsProvider>
       </body>
     </html>

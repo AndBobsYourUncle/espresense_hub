@@ -341,8 +341,10 @@ export default function SettingsClient() {
         </span>
       </div>
 
-      {/* Tab bar */}
-      <nav className="flex items-center gap-0.5 px-4 pt-3 border-b border-zinc-200 dark:border-zinc-800">
+      {/* Tab bar — horizontally scrollable on narrow widths so all tabs
+          remain reachable without wrapping to a second row. Labels hide
+          on the smallest viewports leaving icon-only buttons. */}
+      <nav className="flex items-center gap-0.5 px-2 sm:px-4 pt-3 border-b border-zinc-200 dark:border-zinc-800 overflow-x-auto whitespace-nowrap">
         {TABS.map((t) => {
           const active = tab === t.key;
           const Icon = t.icon;
@@ -352,14 +354,14 @@ export default function SettingsClient() {
               type="button"
               onClick={() => setTab(t.key)}
               title={t.hint}
-              className={`inline-flex items-center gap-1.5 h-9 px-3 text-xs font-medium border-b-2 -mb-px transition-colors ${
+              className={`inline-flex items-center gap-1.5 h-9 px-2 sm:px-3 text-xs font-medium border-b-2 -mb-px transition-colors shrink-0 ${
                 active
                   ? "border-blue-500 text-blue-600 dark:text-blue-400"
                   : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
               }`}
             >
               <Icon className="h-3.5 w-3.5" />
-              {t.label}
+              <span className="hidden sm:inline">{t.label}</span>
             </button>
           );
         })}
@@ -447,7 +449,7 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-3 items-start py-2.5 border-b border-zinc-100 dark:border-zinc-800/50">
+    <div className="grid grid-cols-1 @md:grid-cols-[220px_1fr] gap-3 items-start py-2.5 border-b border-zinc-100 dark:border-zinc-800/50">
       <div className="pt-1.5">
         <div className="text-xs font-medium text-zinc-900 dark:text-zinc-100">
           {label}
@@ -473,7 +475,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="px-6 pt-5 pb-2 max-w-3xl">
+    <section className="@container px-4 sm:px-6 pt-5 pb-2 max-w-3xl">
       <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
         {title}
       </h2>
@@ -1058,8 +1060,8 @@ function ListRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-3 p-3 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 mb-2">
-      <div className="flex-1 min-w-0 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-2">
+    <div className="@container flex items-start gap-3 p-3 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 mb-2">
+      <div className="flex-1 min-w-0 grid grid-cols-1 @md:grid-cols-2 @xl:grid-cols-3 gap-x-4 gap-y-2">
         {children}
       </div>
       <button

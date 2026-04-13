@@ -60,14 +60,14 @@ export default function MapToolbar() {
             onClick={() => setActiveTool(tool)}
             title={hint}
             aria-pressed={active}
-            className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded text-xs font-medium transition-colors ${
+            className={`inline-flex items-center gap-1.5 h-7 px-2 sm:px-2.5 rounded text-xs font-medium transition-colors ${
               active
                 ? "bg-blue-500 text-white"
                 : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900"
             }`}
           >
             <Icon className="h-3.5 w-3.5" />
-            {label}
+            <span className="hidden sm:inline">{label}</span>
           </button>
         );
       })}
@@ -77,14 +77,14 @@ export default function MapToolbar() {
         onClick={() => setCompareMode(!compareMode)}
         title="Show baseline (raw IDW) ghost markers alongside path-aware results"
         aria-pressed={compareMode}
-        className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded text-xs font-medium transition-colors ${
+        className={`inline-flex items-center gap-1.5 h-7 px-2 sm:px-2.5 rounded text-xs font-medium transition-colors ${
           compareMode
             ? "bg-purple-500 text-white"
             : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900"
         }`}
       >
         <GitCompareArrows className="h-3.5 w-3.5" />
-        Compare
+        <span className="hidden sm:inline">Compare</span>
       </button>
     </div>
   );

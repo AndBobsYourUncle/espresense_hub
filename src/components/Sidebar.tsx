@@ -11,6 +11,7 @@ import {
   Settings,
   Radio,
 } from "lucide-react";
+import { useMobileNav } from "./MobileNavProvider";
 import { useUnits } from "./UnitsProvider";
 
 const navItems = [
@@ -85,13 +86,47 @@ export default function Sidebar() {
   const pathname = usePathname();
   const status = useStatus();
   const { units, setUnits } = useUnits();
+  const { open, close } = useMobileNav();
 
   const mqttStatus = status?.mqtt.status ?? "disconnected";
   const style = STATUS_STYLES[mqttStatus];
   const detail = status?.mqtt.host ?? status?.mqtt.error;
 
   return (
-    <aside className="w-60 shrink-0 border-r border-zinc-200 dark:border-zinc-800 flex flex-col bg-zinc-50/50 dark:bg-zinc-950/50">
+    <>
+      {/* Backdrop — only renders when the mobile drawer is open. Click to
+          close. Hidden at md+ where the sidebar is always-visible chrome. */}
+      <button
+        type="button"
+        aria-hidden={!open}
+        tabIndex={open ? 0 : -1}
+        onClick={close}
+        className={`md:hidden fixed inset-0 z-40 bg-black/40 backdrop-blur-sm transition-opacity ${
+          open
+            ? "opacity-100 pointer-events-auto"
+            : "opacity-0 pointer-events-none"
+        }`}
+      />
+      <aside
+        className={`
+          flex flex-col bg-zinc-50/50 dark:bg-zinc-950/50
+          border-r border-zinc-200 dark:border-zinc-800
+          fixed inset-y-0 left-0 z-50 w-60
+          transition-transform duration-200 ease-out
+          md:static md:translate-x-0 md:shrink-0
+          ${open ? "translate-x-0 shadow-2xl md:shadow-none" : "-translate-x-full md:translate-x-0"}
+        `}
+        onClick={(e) => {
+          // Close drawer when a nav link is clicked. The link's own
+          // navigation still fires (we don't preventDefault).
+          if (
+            e.target instanceof HTMLElement &&
+            e.target.closest("a[href]")
+          ) {
+            close();
+          }
+        }}
+      >
       <div className="h-16 flex items-center gap-2 px-5 border-b border-zinc-200 dark:border-zinc-800">
         <Radio className="h-5 w-5 text-blue-500" />
         <span className="font-semibold tracking-tight">ESPresense Hub</span>
@@ -173,5 +208,6 @@ export default function Sidebar() {
         </div>
       </div>
     </aside>
+    </>
   );
 }

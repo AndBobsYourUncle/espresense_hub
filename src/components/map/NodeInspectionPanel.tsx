@@ -99,7 +99,7 @@ export default function NodeInspectionPanel({ nodes }: Props) {
       style={{
         transform: `translate(${pos.x}px, ${pos.y}px)`,
       }}
-      className="absolute top-16 right-4 z-20 w-[300px] max-w-[90vw] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg flex flex-col"
+      className="absolute z-20 inset-x-2 top-2 bottom-2 sm:inset-auto sm:top-16 sm:right-4 sm:bottom-auto sm:w-[300px] sm:max-w-[90vw] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg flex flex-col"
     >
       {/* Drag handle = the header */}
       <header

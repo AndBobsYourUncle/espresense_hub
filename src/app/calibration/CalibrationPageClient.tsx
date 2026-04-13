@@ -687,17 +687,17 @@ function AutoApplyStatus({
     : null;
 
   return (
-    <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 text-xs">
+    <div className="@container rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 text-xs">
       <button
         type="button"
         onClick={() => setExpanded((x) => !x)}
-        className="w-full flex items-center justify-between gap-2 text-left px-4 py-3"
+        className="w-full flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-left px-4 py-3"
       >
-        <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300">
-          <Activity className="h-3.5 w-3.5 text-emerald-500" />
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-zinc-700 dark:text-zinc-300 min-w-0">
+          <Activity className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
           <span className="font-medium">Auto-apply</span>
           <span
-            className="inline-flex items-center gap-1 text-zinc-500 dark:text-zinc-400"
+            className="inline-flex items-center gap-1 text-zinc-500 dark:text-zinc-400 whitespace-nowrap"
             title={`Cycle runs every ${intervalMin.toFixed(0)} minutes`}
           >
             <Timer className="h-3 w-3" />
@@ -705,7 +705,7 @@ function AutoApplyStatus({
           </span>
           {rateLimited.length > 0 && (
             <span
-              className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400"
+              className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 whitespace-nowrap"
               title={`${rateLimited.length} node${rateLimited.length === 1 ? "" : "s"} rate-limited (${rateLimitMin.toFixed(0)}-min cooldown after each push)`}
             >
               <Clock className="h-3 w-3" />
@@ -713,17 +713,17 @@ function AutoApplyStatus({
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-zinc-500 dark:text-zinc-400 min-w-0">
           {lastEvent ? (
             <>
-              <span>last action {lastAgo}</span>
-              <span className="text-zinc-300 dark:text-zinc-700">·</span>
-              <span>
+              <span className="whitespace-nowrap">last action {lastAgo}</span>
+              <span className="text-zinc-300 dark:text-zinc-700 hidden @md:inline">·</span>
+              <span className="whitespace-nowrap">
                 {lastHourCount} change{lastHourCount === 1 ? "" : "s"}/hr
               </span>
             </>
           ) : (
-            <span>system stable — no changes pushed yet</span>
+            <span className="whitespace-nowrap">system stable — no changes pushed yet</span>
           )}
           <ChevronDown
             className={`h-3 w-3 text-zinc-400 transition-transform ${expanded ? "rotate-180" : ""}`}
@@ -911,29 +911,29 @@ function LocatorComparisonPanel() {
   const farthest = sorted[sorted.length - 1];
 
   return (
-    <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 text-xs">
+    <div className="@container rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 text-xs">
       <button
         type="button"
         onClick={() => setExpanded((x) => !x)}
-        className="w-full flex items-center justify-between gap-2 text-left px-4 py-3"
+        className="w-full flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-left px-4 py-3"
       >
-        <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300">
-          <GitCompareArrows className="h-3.5 w-3.5 text-purple-500" />
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-zinc-700 dark:text-zinc-300 min-w-0">
+          <GitCompareArrows className="h-3.5 w-3.5 text-purple-500 shrink-0" />
           <span className="font-medium">Locator comparison</span>
-          <span className="text-zinc-500 dark:text-zinc-400">
+          <span className="text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
             {aggregates.length} locators · {totalSamples.toLocaleString()} total
             samples
           </span>
         </div>
-        <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-zinc-500 dark:text-zinc-400 min-w-0">
           {closest && farthest && closest.key !== farthest.key && (
             <>
-              <span className="text-emerald-600 dark:text-emerald-400 font-mono">
+              <span className="text-emerald-600 dark:text-emerald-400 font-mono whitespace-nowrap">
                 closest: {LOCATOR_LABELS[closest.key] ?? closest.key}{" "}
                 {formatDistanceDisplay(closest.mean, units)}
               </span>
-              <span className="text-zinc-300 dark:text-zinc-700">·</span>
-              <span className="text-amber-600 dark:text-amber-400 font-mono">
+              <span className="text-zinc-300 dark:text-zinc-700 hidden @md:inline">·</span>
+              <span className="text-amber-600 dark:text-amber-400 font-mono whitespace-nowrap">
                 farthest: {LOCATOR_LABELS[farthest.key] ?? farthest.key}{" "}
                 {formatDistanceDisplay(farthest.mean, units)}
               </span>
