@@ -92,6 +92,41 @@ export default function Sidebar() {
   const style = STATUS_STYLES[mqttStatus];
   const detail = status?.mqtt.host ?? status?.mqtt.error;
 
+  // Shared unit toggle JSX — used both in the mobile-landscape compact
+  // status row and in the standalone units row at other breakpoints.
+  const unitToggle = (
+    <div
+      className="inline-flex rounded-md border border-zinc-200 dark:border-zinc-800 overflow-hidden text-xs font-medium shrink-0"
+      role="group"
+      aria-label="Unit system"
+    >
+      <button
+        type="button"
+        onClick={() => setUnits("metric")}
+        className={`px-2 py-0.5 transition-colors ${
+          units === "metric"
+            ? "bg-blue-500 text-white"
+            : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900"
+        }`}
+        aria-pressed={units === "metric"}
+      >
+        m
+      </button>
+      <button
+        type="button"
+        onClick={() => setUnits("imperial")}
+        className={`px-2 py-0.5 transition-colors ${
+          units === "imperial"
+            ? "bg-blue-500 text-white"
+            : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900"
+        }`}
+        aria-pressed={units === "imperial"}
+      >
+        in
+      </button>
+    </div>
+  );
+
   return (
     <>
       {/* Backdrop — only renders when the mobile drawer is open. Click to
@@ -167,16 +202,20 @@ export default function Sidebar() {
             status?.mqtt.error ?? status?.mqtt.host ?? undefined
           }
         >
-          {/* Mobile-landscape compact: dot + count on a single row.
-              The "MQTT [Connected]" label is implicit (the colored
-              dot conveys it) and the host detail is in the tooltip. */}
-          <div className="hidden max-lg:landscape:flex items-center gap-2">
-            <span className={`h-2 w-2 rounded-full shrink-0 ${style.dot}`} />
-            {status && (
-              <span className="text-zinc-500 dark:text-zinc-400">
-                {status.nodeCount} nodes · {status.deviceCount} devices
-              </span>
-            )}
+          {/* Mobile-landscape compact: dot + count on the left, unit
+              toggle on the right. The "MQTT [Connected]" label is
+              implicit (the colored dot conveys it) and the host detail
+              is in the tooltip. Saves an entire row of vertical space. */}
+          <div className="hidden max-lg:landscape:flex items-center gap-2 justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className={`h-2 w-2 rounded-full shrink-0 ${style.dot}`} />
+              {status && (
+                <span className="text-zinc-500 dark:text-zinc-400 truncate">
+                  {status.nodeCount} nodes · {status.deviceCount} devices
+                </span>
+              )}
+            </div>
+            {unitToggle}
           </div>
 
           {/* Default view: full status text + host + count. */}
