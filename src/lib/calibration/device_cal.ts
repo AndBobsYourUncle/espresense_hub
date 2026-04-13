@@ -93,12 +93,29 @@ export function recordDevicePin(
   return pin;
 }
 
-/** Mark a specific pin as active for accumulation. Deactivates any
- *  other active pin for the same device. Also resets the device's
- *  Kalman velocity to zero — clicking "activate" is the user
- *  asserting "I am stationary at this spot right now", so any prior
- *  velocity estimate (e.g. from walking up to drop the pin) would
- *  otherwise trigger the motion detector and immediately deactivate. */
+/**
+ * Mark a specific pin as active for accumulation. Deactivates any
+ * other active pin for the same device.
+ *
+ * **Snaps the Kalman state to the pin's position and zero velocity.**
+ * Clicking "activate" is the user explicitly asserting "device is at
+ * this spot, right now" — that's ground truth, more reliable than
+ * whatever the locator currently thinks. Snapping the Kalman state
+ * matters for two reasons:
+ *
+ *   1. The proximity gate that decides whether to accumulate samples
+ *      compares the device's current position to the pin. Without
+ *      this snap, a pin placed precisely *because* the position
+ *      estimate is wrong would fail the gate immediately and never
+ *      accumulate — a chicken-and-egg failure mode that defeats the
+ *      whole point of pinning.
+ *   2. Velocity estimates from walking up to drop the pin would
+ *      otherwise read as motion and trigger immediate deactivation.
+ *
+ * The next position update then flows from this user-truth as the
+ * prior, and the device-specific bias data starts accumulating
+ * relative to a known location.
+ */
 export function activatePin(
   store: Store,
   deviceId: string,
@@ -117,14 +134,44 @@ export function activatePin(
     }
   }
 
-  // Zero the Kalman velocity for this device (if state exists).
-  // Position is left untouched — the locator already knows where it
-  // thinks the device is; we're just stating the velocity is ~0.
-  const device = store.devices.get(deviceId);
-  if (device?.kalman?.x && device.kalman.x.length >= 6) {
-    device.kalman.x[3] = 0;
-    device.kalman.x[4] = 0;
-    device.kalman.x[5] = 0;
+  // Snap the Kalman state's position + velocity to ground truth.
+  if (target) {
+    const device = store.devices.get(deviceId);
+    if (device?.kalman?.x && device.kalman.x.length >= 6) {
+      device.kalman.x[0] = target.position[0];
+      device.kalman.x[1] = target.position[1];
+      device.kalman.x[2] = target.position[2];
+      device.kalman.x[3] = 0;
+      device.kalman.x[4] = 0;
+      device.kalman.x[5] = 0;
+    }
+    // Also snap the cached `position` so the UI immediately reflects
+    // the new ground truth on the next render — otherwise the user
+    // sees the marker stuck at the wrong place until a fresh fix
+    // arrives and propagates through the locator.
+    if (device) {
+      if (device.position) {
+        device.position = {
+          ...device.position,
+          x: target.position[0],
+          y: target.position[1],
+          z: target.position[2],
+          confidence: 1,
+          algorithm: "pin_anchored",
+          computedAt: now,
+        };
+      } else {
+        device.position = {
+          x: target.position[0],
+          y: target.position[1],
+          z: target.position[2],
+          confidence: 1,
+          fixes: 0,
+          algorithm: "pin_anchored",
+          computedAt: now,
+        };
+      }
+    }
   }
 
   return target;
