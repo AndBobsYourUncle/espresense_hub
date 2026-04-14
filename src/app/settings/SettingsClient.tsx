@@ -4,7 +4,9 @@ import { useEffect, useReducer, useState } from "react";
 import { parseDocument, type Document } from "yaml";
 import {
   AlertCircle,
+  Archive,
   Check,
+  Download,
   FileText,
   Loader2,
   MapPin,
@@ -20,6 +22,7 @@ import {
   Code,
   Map as MapIcon,
   Trash2,
+  Upload,
 } from "lucide-react";
 
 interface LoadResponse {
@@ -56,6 +59,7 @@ type TabKey =
   | "nodes"
   | "rooms"
   | "presence"
+  | "snapshot"
   | "advanced";
 
 const TABS: Array<{
@@ -72,6 +76,7 @@ const TABS: Array<{
   { key: "nodes", label: "Nodes", icon: Router, hint: "Per-node metadata (positions: edit on map)" },
   { key: "rooms", label: "Rooms", icon: Square, hint: "Room adjacency (polygons: edit in YAML)" },
   { key: "presence", label: "Presence", icon: MapPin, hint: "Home Assistant presence zones" },
+  { key: "snapshot", label: "Snapshot", icon: Archive, hint: "Export / import config + calibration + devices" },
   { key: "advanced", label: "Advanced", icon: Code, hint: "Raw YAML editor" },
 ];
 
@@ -390,6 +395,8 @@ export default function SettingsClient() {
           <RoomsTab doc={doc} setField={setField} addToList={addToList} deleteAt={deleteAt} />
         ) : tab === "presence" ? (
           <PresenceTab doc={doc} setField={setField} addToList={addToList} deleteAt={deleteAt} />
+        ) : tab === "snapshot" ? (
+          <SnapshotTab />
         ) : (
           <AdvancedTab yaml={yaml} setRawYaml={setRawYaml} />
         )}
@@ -1674,5 +1681,277 @@ function AdvancedTab({
         rooms, nodes, devices, locator weights, etc.). Validated on save.
       </p>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot tab — export/import the full deployment state
+// ---------------------------------------------------------------------------
+
+type SnapshotStatus =
+  | { kind: "idle" }
+  | { kind: "exporting" }
+  | { kind: "importing" }
+  | { kind: "imported"; exportedAt: string; hubVersion: string }
+  | { kind: "restarting" }
+  | { kind: "error"; message: string };
+
+function SnapshotTab() {
+  const [status, setStatus] = useState<SnapshotStatus>({ kind: "idle" });
+  const [confirming, setConfirming] = useState<File | null>(null);
+
+  const exportSnapshot = async () => {
+    setStatus({ kind: "exporting" });
+    try {
+      const res = await fetch("/api/snapshot", { cache: "no-store" });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setStatus({
+          kind: "error",
+          message: body.error ?? `export failed (${res.status})`,
+        });
+        return;
+      }
+      // Pull the filename out of the Content-Disposition header so the
+      // browser's download dialog gets the same timestamped name the
+      // server suggested.
+      const disposition = res.headers.get("content-disposition") ?? "";
+      const match = /filename="([^"]+)"/.exec(disposition);
+      const filename = match?.[1] ?? "espresense-hub-snapshot.json";
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setStatus({ kind: "idle" });
+    } catch (err) {
+      setStatus({ kind: "error", message: (err as Error).message });
+    }
+  };
+
+  const performImport = async (file: File) => {
+    setConfirming(null);
+    setStatus({ kind: "importing" });
+    try {
+      const text = await file.text();
+      // Parse client-side first so we reject obviously-bad files without
+      // a round trip. Server revalidates anyway.
+      try {
+        JSON.parse(text);
+      } catch {
+        setStatus({
+          kind: "error",
+          message: "File is not valid JSON — did you pick a snapshot file?",
+        });
+        return;
+      }
+      const res = await fetch("/api/snapshot", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: text,
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        exportedAt?: string;
+        hubVersion?: string;
+      };
+      if (!res.ok) {
+        setStatus({
+          kind: "error",
+          message: body.error ?? `import failed (${res.status})`,
+        });
+        return;
+      }
+      setStatus({
+        kind: "imported",
+        exportedAt: body.exportedAt ?? "",
+        hubVersion: body.hubVersion ?? "unknown",
+      });
+    } catch (err) {
+      setStatus({ kind: "error", message: (err as Error).message });
+    }
+  };
+
+  const restart = async () => {
+    if (
+      !confirm(
+        "Restart the service to apply the imported snapshot? This will briefly drop the connection.",
+      )
+    ) {
+      return;
+    }
+    setStatus({ kind: "restarting" });
+    try {
+      const res = await fetch("/api/restart", { method: "POST" });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        setStatus({
+          kind: "error",
+          message: body.error ?? `restart failed (${res.status})`,
+        });
+        return;
+      }
+      // Poll until the service is back, then reload.
+      const start = Date.now();
+      const poll = async (): Promise<void> => {
+        if (Date.now() - start > 30_000) {
+          setStatus({
+            kind: "error",
+            message: "Service didn't come back within 30 s — check journalctl.",
+          });
+          return;
+        }
+        try {
+          const ping = await fetch("/api/config", { cache: "no-store" });
+          if (ping.ok) {
+            window.location.reload();
+            return;
+          }
+        } catch {
+          // still down
+        }
+        setTimeout(poll, 500);
+      };
+      setTimeout(poll, 1500);
+    } catch (err) {
+      setStatus({ kind: "error", message: (err as Error).message });
+    }
+  };
+
+  const busy =
+    status.kind === "exporting" ||
+    status.kind === "importing" ||
+    status.kind === "restarting";
+
+  return (
+    <>
+      <Section
+        title="Export snapshot"
+        description="Download a single JSON file containing config.yaml + calibration + device pins + audit log. Use it as a backup, or to clone this deployment to another machine watching the same home. The file contains MQTT credentials and all learned calibration — treat it like a secret."
+      >
+        <div className="px-0 sm:px-0 py-2">
+          <button
+            type="button"
+            onClick={exportSnapshot}
+            disabled={busy}
+            className="h-9 px-4 inline-flex items-center gap-2 rounded-md text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {status.kind === "exporting" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            Export snapshot
+          </button>
+        </div>
+      </Section>
+
+      <Section
+        title="Import snapshot"
+        description="Replace this instance's config + calibration + devices + audit log with the contents of a snapshot file. The import is validated before anything on disk is touched, then applied atomically per-file. A service restart is required afterward — the in-memory state isn't hot-reloaded."
+      >
+        <div className="px-0 py-2 space-y-2">
+          <label className="inline-flex items-center gap-2 cursor-pointer">
+            <input
+              type="file"
+              accept="application/json,.json"
+              disabled={busy}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) setConfirming(f);
+                // Reset input so picking the same file twice in a row still fires.
+                e.target.value = "";
+              }}
+              className="hidden"
+            />
+            <span
+              className={`h-9 px-4 inline-flex items-center gap-2 rounded-md text-sm font-medium border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300 ${
+                busy ? "opacity-50 cursor-not-allowed" : ""
+              }`}
+            >
+              {status.kind === "importing" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="h-4 w-4" />
+              )}
+              Choose snapshot file…
+            </span>
+          </label>
+
+          {confirming && (
+            <div className="rounded-md border border-amber-300 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-xs space-y-2">
+              <div className="text-amber-800 dark:text-amber-300 font-medium">
+                Replace this instance&apos;s state with{" "}
+                <span className="font-mono">{confirming.name}</span>?
+              </div>
+              <p className="text-amber-700 dark:text-amber-400 leading-relaxed">
+                This overwrites your config.yaml, calibration.json, devices.json,
+                and audit.json. Existing data will be lost. A service restart
+                is required to complete the import.
+              </p>
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => performImport(confirming)}
+                  className="h-8 px-3 rounded-md text-xs font-medium bg-amber-600 hover:bg-amber-700 text-white"
+                >
+                  Replace & import
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirming(null)}
+                  className="h-8 px-3 rounded-md text-xs font-medium border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {status.kind === "imported" && (
+            <div className="rounded-md border border-emerald-300 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/20 p-3 text-xs space-y-2">
+              <div className="text-emerald-800 dark:text-emerald-300 font-medium flex items-center gap-1.5">
+                <Check className="h-3.5 w-3.5" />
+                Snapshot imported successfully
+              </div>
+              <p className="text-emerald-700 dark:text-emerald-400 leading-relaxed">
+                Snapshot exported {status.exportedAt || "(unknown date)"} from
+                hub version {status.hubVersion}. Restart the service to load
+                the new state into memory.
+              </p>
+              <button
+                type="button"
+                onClick={restart}
+                disabled={busy}
+                className="h-8 px-3 inline-flex items-center gap-1.5 rounded-md text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Restart now
+              </button>
+            </div>
+          )}
+
+          {status.kind === "restarting" && (
+            <div className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 p-3 text-xs text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Restarting service — this page will reload when it&apos;s back.
+            </div>
+          )}
+
+          {status.kind === "error" && (
+            <div className="rounded-md border border-red-300 dark:border-red-900/60 bg-red-50/50 dark:bg-red-950/20 p-3 text-xs text-red-700 dark:text-red-400">
+              <AlertCircle className="h-3.5 w-3.5 inline-block mr-1.5 -mt-0.5" />
+              {status.message}
+            </div>
+          )}
+        </div>
+      </Section>
+    </>
   );
 }
