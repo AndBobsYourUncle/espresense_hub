@@ -313,7 +313,6 @@ async function ensureDiscovery(
   const key = `${deviceId}::${zoneId ?? "__default__"}`;
   const s = state();
   if (s.sentDiscovery.has(key)) return;
-  s.sentDiscovery.add(key);
 
   // HA forms the entity_id as "{device_name}_{entity_name}" when a device
   // block is present, so the entity name should describe the tracker type,
@@ -346,6 +345,10 @@ async function ensureDiscovery(
     JSON.stringify(payload),
     { retain: true, qos: 1 },
   );
+  // Mark sent only AFTER a successful publish — otherwise a transient
+  // failure silently poisons this key for the rest of the process
+  // lifetime and the entity never appears in HA.
+  s.sentDiscovery.add(key);
 }
 
 /**
@@ -365,7 +368,6 @@ async function ensureSmartDiscovery(
   const key = `${deviceId}::__smart__`;
   const s = state();
   if (s.sentDiscovery.has(key)) return;
-  s.sentDiscovery.add(key);
 
   const payload = {
     name: "Smart Location",
@@ -388,6 +390,7 @@ async function ensureSmartDiscovery(
     JSON.stringify(payload),
     { retain: true, qos: 1 },
   );
+  s.sentDiscovery.add(key);
 }
 
 // ─── Away publishing ──────────────────────────────────────────────────────────
