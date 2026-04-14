@@ -1373,41 +1373,43 @@ function RoomsTab({ doc, setField, addToList, deleteAt }: DocListProps) {
                               setField(["floors", fi, "rooms", ri, "open_to"], next);
                             };
                             return (
-                              <div key={e.id} className="flex items-center gap-2 flex-wrap">
-                                <span className="text-xs text-zinc-700 dark:text-zinc-300 w-24 truncate">
+                              <div key={e.id}>
+                                <div className="text-xs text-zinc-700 dark:text-zinc-300 truncate">
                                   {e.id}
-                                </span>
-                                <span className="text-[11px] text-zinc-400">x</span>
-                                <input
-                                  type="number"
-                                  step={0.01}
-                                  value={dx}
-                                  onChange={(ev) => {
-                                    const v = Number(ev.target.value);
-                                    if (Number.isFinite(v)) updateDoor(v, undefined);
-                                  }}
-                                  className="w-20 h-7 px-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                />
-                                <span className="text-[11px] text-zinc-400">y</span>
-                                <input
-                                  type="number"
-                                  step={0.01}
-                                  value={dy}
-                                  onChange={(ev) => {
-                                    const v = Number(ev.target.value);
-                                    if (Number.isFinite(v)) updateDoor(undefined, v);
-                                  }}
-                                  className="w-20 h-7 px-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={clearDoor}
-                                  className="h-6 w-6 inline-flex items-center justify-center rounded text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
-                                  title="Clear door position (keep connection)"
-                                  aria-label="Clear door"
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </button>
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  <span className="text-[10px] text-zinc-400 w-2">x</span>
+                                  <input
+                                    type="number"
+                                    step={0.01}
+                                    value={dx}
+                                    onChange={(ev) => {
+                                      const v = Number(ev.target.value);
+                                      if (Number.isFinite(v)) updateDoor(v, undefined);
+                                    }}
+                                    className="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  />
+                                  <span className="text-[10px] text-zinc-400 w-2">y</span>
+                                  <input
+                                    type="number"
+                                    step={0.01}
+                                    value={dy}
+                                    onChange={(ev) => {
+                                      const v = Number(ev.target.value);
+                                      if (Number.isFinite(v)) updateDoor(undefined, v);
+                                    }}
+                                    className="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={clearDoor}
+                                    className="shrink-0 h-6 w-6 inline-flex items-center justify-center rounded text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                    title="Clear door position (keep connection)"
+                                    aria-label="Clear door"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
+                                </div>
                               </div>
                             );
                           })}
