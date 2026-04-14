@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import { reloadLiveConfig } from "@/lib/bootstrap";
 import { ConfigWriteError, updateNodePoint } from "@/lib/config/write";
-import { getStore } from "@/lib/state/store";
 
 export const dynamic = "force-dynamic";
 
@@ -48,10 +48,9 @@ export async function PATCH(
     );
   }
 
-  // Update the live nodeIndex so the locator picks up the new position on
-  // the very next message.
-  const store = getStore();
-  store.nodeIndex.set(id, triple);
+  // Push the new config into the live holder so the locator + node index
+  // pick up the new position on the very next message.
+  await reloadLiveConfig();
 
   return NextResponse.json({ ok: true, id, point: triple });
 }

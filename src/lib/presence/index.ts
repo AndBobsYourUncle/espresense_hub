@@ -593,6 +593,11 @@ export async function publishPresence({
   if (s.lastState.get(defKey) !== defState) {
     s.lastState.set(defKey, defState);
     await ensureDiscovery(deviceId, deviceName, discoveryPrefix);
+    // State is ephemeral — not retained on the broker. Stale retained
+    // state would be misleading if the hub stays down (HA would see a
+    // hours-old "home" on its next reconnect). The corresponding
+    // `publishDeviceAway` cleanup publishes `not_home` on away_timeout,
+    // and HA sees the first real state on the next live message.
     await publishRaw(stateTopic(deviceId), defState, { retain: false, qos: 1 });
   } else {
     // Discovery may not have been sent yet even if state hasn't changed

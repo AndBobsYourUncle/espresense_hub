@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { loadConfig } from "@/lib/config";
+import { reloadLiveConfig } from "@/lib/bootstrap";
 import { ConfigWriteError, scaleConfig } from "@/lib/config/write";
-import { getStore } from "@/lib/state/store";
 
 export const dynamic = "force-dynamic";
 
@@ -52,19 +51,9 @@ export async function POST(request: Request) {
     );
   }
 
-  // Repopulate the live nodeIndex from the rescaled config so the locator
-  // uses new positions starting with the very next message.
-  try {
-    const config = await loadConfig();
-    const store = getStore();
-    store.nodeIndex.clear();
-    for (const n of config.nodes) {
-      if (n.id && n.point) store.nodeIndex.set(n.id, n.point);
-    }
-  } catch {
-    // The file write succeeded; if reload fails the next bootstrap will
-    // catch up. Don't fail the request.
-  }
+  // Push the rescaled config into the live holder so the locator + node
+  // index pick up new positions on the very next message.
+  await reloadLiveConfig();
 
   return NextResponse.json({ ok: true, factor, ...result });
 }

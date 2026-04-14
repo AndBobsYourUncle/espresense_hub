@@ -43,6 +43,40 @@ const globalForBootstrap = globalThis as unknown as {
 };
 
 /**
+ * Re-read config.yaml from disk, push it into the live-config holder, and
+ * re-apply every stateful runtime setting + the shared `nodeIndex`.
+ *
+ * Called by every API endpoint that mutates config.yaml (not just the
+ * Settings UI save — also map-based edits like room relations, node
+ * positions, presence zones, and scale calibration) so changes take
+ * effect on the next MQTT message without a service restart. Idempotent
+ * — safe to call after every write.
+ *
+ * Returns `true` on success, `false` if the reload failed (kept the
+ * old in-memory config intact; the on-disk YAML was already written
+ * successfully by the caller).
+ */
+export async function reloadLiveConfig(): Promise<boolean> {
+  try {
+    const config = await loadConfig();
+    setCurrentConfig(config);
+    applyRuntimeConfig(config);
+    const store = getStore();
+    store.nodeIndex.clear();
+    for (const n of config.nodes) {
+      if (n.id && n.point) store.nodeIndex.set(n.id, n.point);
+    }
+    return true;
+  } catch (err) {
+    console.error(
+      "[bootstrap] reloadLiveConfig failed:",
+      (err as Error).message,
+    );
+    return false;
+  }
+}
+
+/**
  * Apply config values that drive stateful singletons (Kalman, smoothing, the
  * auto-apply loop). Called at bootstrap and again by the config save endpoint
  * so edits in the Settings UI take effect without a restart. Idempotent.

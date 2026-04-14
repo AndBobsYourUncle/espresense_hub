@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { reloadLiveConfig } from "@/lib/bootstrap";
 import { ConfigWriteError, updateRoomRelations } from "@/lib/config/write";
 
 export const dynamic = "force-dynamic";
@@ -68,6 +69,7 @@ export async function PATCH(
       body.floor_area as string | null | undefined,
       removeFromRooms,
     );
+    await reloadLiveConfig();
   } catch (err) {
     if (err instanceof ConfigWriteError) {
       const status =

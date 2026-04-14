@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server";
-import { applyRuntimeConfig } from "@/lib/bootstrap";
-import { loadConfig } from "@/lib/config";
-import { setCurrentConfig } from "@/lib/config/current";
+import { reloadLiveConfig } from "@/lib/bootstrap";
 import {
   ConfigWriteError,
   readRawConfig,
   writeRawConfig,
 } from "@/lib/config/write";
-import { getStore } from "@/lib/state/store";
 
 export const dynamic = "force-dynamic";
 
@@ -88,30 +85,17 @@ export async function PUT(request: Request): Promise<Response> {
     );
   }
 
-  // Re-parse the freshly-written YAML and push it into the live-config
-  // holder so the MQTT handler, presence publisher, device cleanup, and
-  // stateful filter singletons all pick up the new values on the next tick.
-  // Node positions are also refreshed in the shared nodeIndex so the
-  // locator reflects them immediately.
+  // Re-read the freshly-written YAML into the live-config holder so the
+  // MQTT handler, presence publisher, device cleanup, and stateful
+  // filter singletons pick up the new values on the next tick. Node
+  // positions land in the shared nodeIndex too.
   //
-  // What still requires a restart: MQTT connection settings (broker host,
-  // credentials) — the client is constructed once. Also the auto-apply
-  // setInterval cadence: changing `optimization.interval_secs` updates the
-  // value the next cycle uses, but the setInterval's own timer was wired
-  // with the old cadence at bootstrap.
-  let liveReloadOk = true;
-  try {
-    const config = await loadConfig();
-    setCurrentConfig(config);
-    applyRuntimeConfig(config);
-    const store = getStore();
-    store.nodeIndex.clear();
-    for (const n of config.nodes) {
-      if (n.id && n.point) store.nodeIndex.set(n.id, n.point);
-    }
-  } catch {
-    liveReloadOk = false;
-  }
+  // What still requires a restart: MQTT connection settings (broker
+  // host, credentials) — the client is constructed once. Also the
+  // auto-apply setInterval cadence: changing `optimization.interval_secs`
+  // updates the value the next cycle uses, but the setInterval's own
+  // timer was wired with the old cadence at bootstrap.
+  const liveReloadOk = await reloadLiveConfig();
 
   return NextResponse.json({
     ok: true,
