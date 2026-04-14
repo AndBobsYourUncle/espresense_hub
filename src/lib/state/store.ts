@@ -535,21 +535,10 @@ export class Store {
       this.devices.set(deviceId, d);
     }
     d.upstreamPosition = pos;
-    if (d.position) {
-      const dx = pos.x - d.position.x;
-      const dy = pos.y - d.position.y;
-      // Room-disagreement flag is false here — computing it would require
-      // config/room access, which this data layer shouldn't reach into.
-      // Upstream-vs-ours room comparison is less interesting than locator
-      // internals anyway; distance alone is enough for the compare view.
-      this.recordLocatorComparison(
-        d,
-        "upstream_companion",
-        Math.sqrt(dx * dx + dy * dy),
-        false,
-        false,
-      );
-    }
+    // NB: the corresponding `recordLocatorComparison` call lives in the
+    // MQTT handler (not here) so it has config/rooms in scope to compute
+    // room and inside/outside disagreement flags properly. This layer
+    // stays pure-data.
   }
 
   /**

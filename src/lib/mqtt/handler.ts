@@ -194,6 +194,30 @@ export function attachHandlers(client: MqttClient): void {
         lastSeen,
         receivedAt: Date.now(),
       });
+      // Record the upstream-vs-active comparison with proper room flags.
+      // This lives here (not inside setDeviceUpstreamPosition) so we have
+      // `config` in scope for the polygon test — upstream "outside" is a
+      // particularly interesting diagnostic since the companion's
+      // scenario picker often flips to "not_home" on a single RSSI
+      // outlier, and we want to see how often.
+      const storedDev = store.devices.get(match.deviceId);
+      if (storedDev?.position) {
+        const allRooms = config.floors.flatMap((f) => f.rooms);
+        const activeRoomId = findRoom(allRooms, [
+          storedDev.position.x,
+          storedDev.position.y,
+        ]);
+        const upstreamRoomId = findRoom(allRooms, [x, y]);
+        const dx = x - storedDev.position.x;
+        const dy = y - storedDev.position.y;
+        store.recordLocatorComparison(
+          storedDev,
+          "upstream_companion",
+          Math.sqrt(dx * dx + dy * dy),
+          upstreamRoomId !== activeRoomId,
+          (upstreamRoomId !== null) !== (activeRoomId !== null),
+        );
+      }
       return;
     }
 
