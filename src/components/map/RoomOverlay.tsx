@@ -517,32 +517,48 @@ export default function RoomOverlay({ floor, transform }: Props) {
                 const sty = transform.flipY ? -edgeInfo.tanY : edgeInfo.tanY;
 
                 const halfW = doorWidth / 2;
-                const hingeX = sx - stx * halfW;
-                const hingeY = sy - sty * halfW;
-                const freeEndX = sx + stx * halfW;
-                const freeEndY = sy + sty * halfW;
-                // Arc start: along the leaf at distance `arcRadius` from the
-                // hinge (same as freeEnd when the door is standard-width,
-                // partway along the leaf for wider openings).
-                const arcStartX = hingeX + stx * arcRadius;
-                const arcStartY = hingeY + sty * arcRadius;
+                // Leaf endpoints. "leafStart" and "leafEnd" are just the two
+                // wall-aligned corners of the leaf; which one acts as the
+                // arc's visual hinge is a style choice (see below).
+                const leafStartX = sx - stx * halfW;
+                const leafStartY = sy - sty * halfW;
+                const leafEndX = sx + stx * halfW;
+                const leafEndY = sy + sty * halfW;
+                // Arc hinge sits at the FAR end of the leaf (leafEnd). For
+                // a standard-width door this just corresponds to the usual
+                // "hinge corner" convention; for wide openings it visually
+                // anchors the swing arc at the far end instead of the near
+                // end, which reads more naturally because the arc then
+                // follows the outer edge of the opening instead of
+                // bisecting the middle of a wide leaf.
+                const hingeX = leafEndX;
+                const hingeY = leafEndY;
+                // From the hinge, the leaf extends back toward leafStart
+                // (negative tangent direction). The arc starts `arcRadius`
+                // along that direction.
+                const inwardTanX = -stx;
+                const inwardTanY = -sty;
+                const arcStartX = hingeX + inwardTanX * arcRadius;
+                const arcStartY = hingeY + inwardTanY * arcRadius;
                 // Open tip: hinge offset outward into the connected room by
                 // arcRadius. Matches the arc radius so the quarter-circle
                 // closes cleanly.
                 const openTipX = hingeX + snx * arcRadius;
                 const openTipY = hingeY + sny * arcRadius;
 
-                // Sweep: cross product of (arcStart−hinge) × (openTip−hinge) in SVG space.
-                // Positive → clockwise in screen coords → sweep=1.
-                const sweep = (sty * snx - stx * sny) >= 0 ? 0 : 1;
+                // Sweep: cross of (arcStart−hinge) × (openTip−hinge) in SVG
+                // space. Positive → clockwise in screen coords → sweep=1.
+                // Using inwardTan instead of stx/sty flips the sign vs. the
+                // original hinge-at-leafStart formulation.
+                const sweep = (inwardTanY * snx - inwardTanX * sny) >= 0 ? 0 : 1;
 
                 const f = (v: number) => v.toFixed(4);
                 return (
                   <g key={`conn-${connId}`} style={{ pointerEvents: "none" }}>
                     {/* Door leaf line — spans the full opening width */}
                     <line
-                      x1={hingeX} y1={hingeY}
-                      x2={freeEndX} y2={freeEndY}
+                      x1={leafStartX} y1={leafStartY}
+                      x2={leafEndX} y2={leafEndY}
                       stroke={ARROW_COLOR}
                       strokeWidth={DOOR_STROKE_W}
                       strokeLinecap="round"
