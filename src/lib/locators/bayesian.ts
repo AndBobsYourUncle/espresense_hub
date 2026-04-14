@@ -20,6 +20,7 @@ interface EdgeData {
 interface TuningParams {
   stayWeight: number;
   teleportWeight: number;
+  outsideTeleportWeight: number;
   proximitySigmaM: number;
   proximityFloor: number;
   defaultDoorWidth: number;
@@ -101,10 +102,26 @@ export class BayesianLocator implements Locator {
   private tuning: TuningParams = {
     stayWeight: 1.6,
     teleportWeight: 0.001,
+    outsideTeleportWeight: 0.001,
     proximitySigmaM: 1.5,
     proximityFloor: 0.05,
     defaultDoorWidth: 0.8,
   };
+
+  /**
+   * All-pairs shortest graph distance in hops. `shortestPaths[a].get(b)`
+   * is the number of open_to / floor_area edges between `a` and `b`, or
+   * `undefined` when there's no path at all. Recomputed via BFS on each
+   * topology change; for home-sized graphs (≤100 rooms) this is a
+   * handful of milliseconds per reload.
+   *
+   * Used to scale the teleport weight by how many intermediate rooms
+   * would have had to be missed for this transition to be plausible.
+   * Adjacent rooms (distance 1) don't use teleport — they use edgeWeight.
+   * Distance 2 = full teleport; distance k>2 falls off as (k−1)⁻² by
+   * default.
+   */
+  private shortestPaths: Map<string, Map<string, number>> = new Map();
 
   constructor(inner: Locator) {
     this.inner = inner;
@@ -164,6 +181,7 @@ export class BayesianLocator implements Locator {
     this.tuning = {
       stayWeight: current.bayesian.stay_weight,
       teleportWeight: current.bayesian.teleport_weight,
+      outsideTeleportWeight: current.bayesian.outside_teleport_weight,
       proximitySigmaM: current.bayesian.proximity_sigma_m,
       proximityFloor: current.bayesian.proximity_floor,
       defaultDoorWidth: current.bayesian.default_door_width_m,
@@ -192,6 +210,33 @@ export class BayesianLocator implements Locator {
           width: openToWidth(entry) ?? this.tuning.defaultDoorWidth,
         });
       }
+    }
+
+    // All-pairs shortest path via BFS. O(N*(N+E)); trivially fast for
+    // home-sized graphs. Consumed by `buildTransitionRow` to scale the
+    // teleport weight by hop distance — rooms physically far apart in
+    // the graph get proportionally smaller non-adjacent probabilities,
+    // eliminating the "Kitchen → Office in one tick" bug where flat
+    // teleport weight treated all non-adjacent transitions as equally
+    // plausible.
+    this.shortestPaths.clear();
+    for (const start of this.states) {
+      const dist = new Map<string, number>();
+      dist.set(start, 0);
+      const queue: string[] = [start];
+      let head = 0;
+      while (head < queue.length) {
+        const curr = queue[head++];
+        const currDist = dist.get(curr) ?? 0;
+        const neighbors = this.graph.get(curr) ?? new Set<string>();
+        for (const next of neighbors) {
+          if (!dist.has(next)) {
+            dist.set(next, currDist + 1);
+            queue.push(next);
+          }
+        }
+      }
+      this.shortestPaths.set(start, dist);
     }
 
     // Topology changed — any old posteriors reference stale room ids.
@@ -262,9 +307,17 @@ export class BayesianLocator implements Locator {
    *   - Graph-adjacent without door (floor_area cliques, or door-less
    *     open_to strings): `default_door_width_m × 1.0` — no location
    *     information so the edge is always available at baseline weight.
-   *   - Non-adjacent ("teleport"): `teleport_weight` — tiny but non-zero
-   *     so a badly-committed state can eventually recover with enough
-   *     contrary evidence. Set to 0 to strictly forbid non-adjacent
+   *   - Non-adjacent ("teleport"): `(base / (hops − 1)²)` where
+   *     `hops` is the shortest graph distance from `from` to `to`. A
+   *     2-hop transition (one intermediate room plausibly unobserved)
+   *     gets the full weight; 3 hops → ¼; 4 hops → 1/9; unreachable
+   *     pairs → 0. Matches the physical intuition that missing ONE
+   *     room is plausible but missing four is not. `base` is
+   *     `teleport_weight` for interior-to-interior transitions, or
+   *     `outside_teleport_weight` when either side is the `outside`
+   *     state. Both default to 0.001 for consistency; set
+   *     `outside_teleport_weight` to 0 once exterior doors are fully
+   *     mapped to strictly require declared doors for outside
    *     transitions.
    */
   private buildTransitionRow(
@@ -275,12 +328,36 @@ export class BayesianLocator implements Locator {
     const row = new Map<string, number>();
     row.set(from, this.tuning.stayWeight);
     const neighbors = this.graph.get(from) ?? new Set<string>();
+    const fromOutside = from === OUTSIDE_ROOM_ID;
+    const distances = this.shortestPaths.get(from);
     for (const to of this.states) {
       if (to === from) continue;
       if (neighbors.has(to)) {
         row.set(to, this.edgeWeight(from, to, obsX, obsY));
+        continue;
+      }
+      // Non-adjacent transition. Two different tuning knobs apply
+      // depending on whether outside is involved — interior-only
+      // non-adjacency uses `teleport_weight`; anything touching the
+      // outside state uses `outside_teleport_weight` (default 0 =
+      // strict: only reachable via declared exterior doors).
+      const involvesOutside = fromOutside || to === OUTSIDE_ROOM_ID;
+      const baseWeight = involvesOutside
+        ? this.tuning.outsideTeleportWeight
+        : this.tuning.teleportWeight;
+      if (baseWeight <= 0) {
+        row.set(to, 0);
+        continue;
+      }
+      // Graph-distance-scaled teleport. `hops` ≥ 2 here (hops=1 would
+      // be an adjacent neighbor, handled above); hops=undefined means
+      // no path exists (disconnected graph component) → zero weight.
+      const hops = distances?.get(to);
+      if (hops == null || hops < 2) {
+        row.set(to, 0);
       } else {
-        row.set(to, this.tuning.teleportWeight);
+        const falloff = (hops - 1) * (hops - 1);
+        row.set(to, baseWeight / falloff);
       }
     }
 

@@ -352,11 +352,35 @@ export const BayesianSchema = z
      * Teleport-weight: unnormalized weight for transitioning to a
      * non-adjacent room (i.e. one not reachable via `open_to` or shared
      * `floor_area`). Kept small but non-zero so a badly-committed state
-     * can eventually recover with enough contrary evidence. Set to 0 to
-     * strictly forbid non-adjacent transitions (recovery from mistakes
-     * requires a transition through adjacent rooms).
+     * can eventually recover with enough contrary evidence. Scaled
+     * quadratically with graph distance (2 hops: full weight, 3 hops:
+     * ¼, 4 hops: 1/9, …) so rooms physically far apart in the graph
+     * get proportionally smaller probabilities. Set to 0 to strictly
+     * forbid non-adjacent transitions.
+     *
+     * Does NOT apply to transitions involving the `outside` state —
+     * those use `outside_teleport_weight` instead, since the
+     * justification for interior teleport ("we may have missed an
+     * intermediate room") doesn't apply to outside.
      */
     teleport_weight: z.number().min(0).default(0.001),
+    /**
+     * Teleport-weight specifically for transitions to/from `outside`
+     * when the device's current room doesn't have a declared exterior
+     * door (non-graph-adjacent to outside). Defaulted to the same value
+     * as `teleport_weight` so behavior is consistent out of the box —
+     * the posterior can still eventually settle on "outside" for a
+     * device that's genuinely left the house even if not every
+     * exterior door is mapped. Same quadratic graph-distance scaling
+     * as `teleport_weight`.
+     *
+     * Set to 0 to strictly require outside be reached only through
+     * declared exterior doors. Useful once your door mapping is
+     * complete — any non-adjacent "outside" posterior is then a
+     * locator hallucination to be rejected rather than a plausible
+     * missed transition.
+     */
+    outside_teleport_weight: z.number().min(0).default(0.001),
     /**
      * Proximity falloff length (metres) for the door-proximity transition
      * prior. A device at distance `d` from a door's centre gets a

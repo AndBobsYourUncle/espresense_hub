@@ -881,12 +881,25 @@ function FilteringTab({ doc, setField }: DocProps) {
         </Field>
         <Field
           label="Teleport weight"
-          hint="Unnormalized weight for non-adjacent transitions. Keeps a badly-committed state recoverable. Set to 0 to strictly forbid 'teleporting' — recovery then requires walking through adjacent rooms. Default 0.001."
+          hint="Unnormalized weight for non-adjacent interior transitions, scaled quadratically by graph hop distance (2 hops: full weight, 3 hops: ¼, 4 hops: 1/9). Keeps a badly-committed state recoverable without letting short hallucinations leak into rooms far away in the graph. Set to 0 to strictly forbid non-adjacent transitions. Default 0.001."
         >
           <NumberInput
             value={get<number>(doc, ["bayesian", "teleport_weight"], 0.001)}
             onChange={(v) => setField(["bayesian", "teleport_weight"], v)}
             step={0.001}
+            min={0}
+          />
+        </Field>
+        <Field
+          label="Outside teleport weight"
+          hint="Separate weight for transitions to/from the 'outside' state when the current room has no declared exterior door. Defaults to 0.001 (same as interior). Once your exterior doors are fully mapped, set this to 0 to strictly require outside be reached only through declared exits — any posterior that reaches outside otherwise is then treated as a hallucination."
+        >
+          <NumberInput
+            value={get<number>(doc, ["bayesian", "outside_teleport_weight"], 0.001)}
+            onChange={(v) =>
+              setField(["bayesian", "outside_teleport_weight"], v)
+            }
+            step={0.0001}
             min={0}
           />
         </Field>
