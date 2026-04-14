@@ -1052,6 +1052,7 @@ function FilteringTab({ doc, setField }: DocProps) {
 
 function MapTab({ doc, setField }: DocProps) {
   return (
+    <>
     <Section
       title="Map display"
       description="How the floor plan is rendered. Changes apply on the next page load."
@@ -1106,6 +1107,59 @@ function MapTab({ doc, setField }: DocProps) {
         />
       </Field>
     </Section>
+
+    <Section
+      title="RF propagation model"
+      description="Physical parameters for predicted RSSI across the floor plan. Used by the RF map tool (diagnostic heatmap) and by future RoomAware / calibration improvements that weight node pairs by their walls-crossed count. Defaults target typical 2.4 GHz BLE in a residential setting."
+    >
+      <Field
+        label="Reference RSSI at 1 m"
+        hint="RSSI (dBm) measured from a transmitter at 1 m distance in open air. Typical BLE beacons calibrate around −59 dBm @ 1 m (the 'TX Power @ 1m' value on iBeacon/Eddystone packets). Default −59."
+      >
+        <NumberInput
+          value={get<number>(doc, ["rf", "reference_rssi_1m"], -59)}
+          onChange={(v) => setField(["rf", "reference_rssi_1m"], v)}
+          step={1}
+          unit="dBm"
+        />
+      </Field>
+      <Field
+        label="Path-loss exponent"
+        hint="Log-distance exponent (n). 2.0 = free-space outdoor. 3.0 = typical indoors with scattered obstacles. 3.5–4.0 = dense environments. Default 3.0."
+      >
+        <NumberInput
+          value={get<number>(doc, ["rf", "path_loss_exponent"], 3.0)}
+          onChange={(v) => setField(["rf", "path_loss_exponent"], v)}
+          step={0.1}
+          min={1}
+        />
+      </Field>
+      <Field
+        label="Wall attenuation"
+        hint="Signal loss per wall crossed (dB). Typical drywall ≈ 3–5 dB at 2.4 GHz; brick or concrete 8–15 dB. Default 4."
+      >
+        <NumberInput
+          value={get<number>(doc, ["rf", "wall_attenuation_db"], 4.0)}
+          onChange={(v) => setField(["rf", "wall_attenuation_db"], v)}
+          step={0.5}
+          min={0}
+          unit="dB"
+        />
+      </Field>
+      <Field
+        label="Door attenuation"
+        hint="Signal loss per declared door/opening crossed (dB). Open doorways ≈ 0 dB (full pass-through); a closed hollow-core door might add 1–3 dB. Default 0."
+      >
+        <NumberInput
+          value={get<number>(doc, ["rf", "door_attenuation_db"], 0.0)}
+          onChange={(v) => setField(["rf", "door_attenuation_db"], v)}
+          step={0.5}
+          min={0}
+          unit="dB"
+        />
+      </Field>
+    </Section>
+    </>
   );
 }
 

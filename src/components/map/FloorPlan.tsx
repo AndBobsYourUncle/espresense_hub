@@ -16,6 +16,7 @@ import DeviceMarkers from "./DeviceMarkers";
 import NodeDebugOverlay from "./NodeDebugOverlay";
 import NodeMarkers, { type NodeMarkerData } from "./NodeMarkers";
 import PinOverlay from "./PinOverlay";
+import RfPropagationOverlay from "./RfPropagationOverlay";
 import RoomOverlay from "./RoomOverlay";
 import WallSelectionOverlay from "./WallSelectionOverlay";
 import { useMapViewport } from "./useMapViewport";
@@ -155,6 +156,23 @@ export default function FloorPlan({ config, floor }: Props) {
           );
         })}
       </g>
+
+      {/* RF propagation heatmap — sits under the room overlay so room
+          outlines + labels render on top of the heatmap. Only visible
+          when the rf-propagation tool is active and a node is selected. */}
+      <RfPropagationOverlay
+        floor={floor}
+        transform={transform}
+        nodes={floorNodes
+          .filter((n): n is NodeMarkerData & { id: string } => !!n.id)
+          .map((n) => ({ id: n.id, point: n.point }))}
+        rfParams={{
+          referenceRssi1m: config.rf.reference_rssi_1m,
+          pathLossExponent: config.rf.path_loss_exponent,
+          wallAttenuationDb: config.rf.wall_attenuation_db,
+          doorAttenuationDb: config.rf.door_attenuation_db,
+        }}
+      />
 
       {/* Room overlay — activates in room-relations and presence-zones modes */}
       <RoomOverlay floor={floor} transform={transform} />

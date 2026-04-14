@@ -1,7 +1,15 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import { GitCompareArrows, Layers, MapPin, MousePointer2, Network, Ruler } from "lucide-react";
+import {
+  GitCompareArrows,
+  Layers,
+  MapPin,
+  MousePointer2,
+  Network,
+  Radio,
+  Ruler,
+} from "lucide-react";
 import { useIsTouch } from "@/lib/hooks/usePointerType";
 import { useMapTool, type MapTool } from "./MapToolProvider";
 
@@ -58,6 +66,15 @@ const TOOLS: ToolDef[] = [
       touch
         ? "Select a zone, then tap rooms to toggle their membership"
         : "Select a zone, then click rooms to toggle their membership",
+  },
+  {
+    tool: "rf-propagation",
+    label: "RF",
+    icon: Radio,
+    hint: (touch) =>
+      touch
+        ? "Tap a node to see its predicted RF coverage across the floor — walls attenuate, doors pass signal through"
+        : "Click a node to see its predicted RF coverage across the floor — walls attenuate, doors pass signal through",
   },
 ];
 

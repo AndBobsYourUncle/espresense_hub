@@ -55,6 +55,58 @@ export const MapSchema = z.object({
   wall_opacity: z.number().nullable().default(0.35),
 });
 
+// ---------------- RF propagation model ----------------
+
+/**
+ * Physical parameters for the log-distance + wall-attenuation RF model.
+ * Used by:
+ *
+ *   - The "RF propagation" map tool to render predicted-coverage heatmaps
+ *     for individual nodes (diagnostic view of how signal propagates
+ *     through the declared walls and doors).
+ *   - Future RoomAware / calibration extensions that weight node pairs
+ *     by how many walls their signal path crosses.
+ *
+ * The model:
+ *
+ *     RSSI(d) = reference_rssi_1m  −  10·path_loss_exponent·log10(d)
+ *                                  −  (walls_crossed × wall_attenuation_db)
+ *                                  −  (doors_crossed × door_attenuation_db)
+ *
+ * Defaults target typical 2.4 GHz BLE in a residential setting. Tune
+ * `wall_attenuation_db` up for brick/concrete construction (8–12 dB
+ * instead of 4).
+ */
+export const RfSchema = z
+  .object({
+    /**
+     * Reference RSSI at 1 m distance in open air, in dBm. Typical BLE
+     * beacons calibrate around −59 dBm @ 1 m (this is the "Measured
+     * Power" / "TX Power @ 1m" value on iBeacon/Eddystone packets).
+     * Default −59.
+     */
+    reference_rssi_1m: z.number().default(-59),
+    /**
+     * Path-loss exponent. 2.0 is free-space (outdoors). 3.0 is typical
+     * indoors with scattered obstacles. 3.5–4.0 for dense environments.
+     * Default 3.0.
+     */
+    path_loss_exponent: z.number().positive().default(3.0),
+    /**
+     * Attenuation per wall crossed (dB). Typical drywall is ~3–5 dB
+     * at 2.4 GHz; brick or concrete is 8–15 dB. Default 4 dB.
+     */
+    wall_attenuation_db: z.number().min(0).default(4.0),
+    /**
+     * Attenuation per door/opening crossed (dB). Open doorways and
+     * archways have essentially no attenuation (0 dB); a closed
+     * hollow-core door might add 1–3 dB. Default 0 (treat declared
+     * doors as fully open).
+     */
+    door_attenuation_db: z.number().min(0).default(0.0),
+  })
+  .prefault({});
+
 // ---------------- Optimization ----------------
 
 export const OptimizationSchema = z
@@ -440,6 +492,7 @@ export const ConfigSchema = z.object({
   /** Passthrough — GPS integration is not yet implemented. Preserved as-is. */
   gps: z.unknown().optional(),
   map: MapSchema.prefault({}),
+  rf: RfSchema,
 
   timeout: z.number().int().default(30),
   away_timeout: z.number().int().default(120),
