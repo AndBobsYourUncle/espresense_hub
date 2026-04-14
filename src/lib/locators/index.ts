@@ -2,6 +2,7 @@ import { lookupBias, shrinkBias } from "@/lib/calibration/device_bias";
 import type { Config } from "@/lib/config";
 import type { Point3D } from "@/lib/map/geometry";
 import { getStore, type DeviceState } from "@/lib/state/store";
+import { BayesianLocator } from "./bayesian";
 import { BFGSLocator } from "./bfgs";
 import { MLELocator } from "./mle";
 import { NadarayaWatsonLocator } from "./nadaraya_watson";
@@ -57,7 +58,6 @@ export function buildLocator(config: Config): LocatorBundle {
   // summary of the only signal it actually has ("device is in this room").
   const allRooms = config.floors.flatMap((f) => f.rooms);
   const nearest = new NearestNodeLocator(allRooms, config.nodes);
-  const allBases: Locator[] = [idw, nm, bfgs, mle, nearest];
 
   // Room-aware circle-overlap locator. Uses the room topology (where
   // walls are) to decide which measurements to trust. Same-room node
@@ -65,7 +65,28 @@ export function buildLocator(config: Config): LocatorBundle {
   // are accurate. Cross-wall pairs are distorted → down-weighted.
   // Finds the position from the weighted centroid of pairwise overlap
   // centers, iterating to refine which room the device is in.
-  const active = new RoomAwareLocator(allRooms, config.nodes);
+  const roomAware = new RoomAwareLocator(allRooms, config.nodes);
+  const active = roomAware;
+
+  // Bayesian room tracker (Phase 3b/3c). Observes from the same RoomAware
+  // locator that drives the active position — Bayesian's job is to apply
+  // graph-aware smoothing *on top* of the best-available observation, not
+  // to re-do trilateration. Maintains a per-device posterior over rooms ∪
+  // {outside}, runs one forward-algorithm step per message, and emits a
+  // position constrained to the most-likely room's polygon. Included in
+  // alternatives so it renders as a side-by-side dot on the map for
+  // comparison with raw RoomAware output.
+  //
+  // Gated on `config.bayesian.enabled` so users on low-powered hosts (or
+  // users who just don't want the extra dot on the map) can skip the work.
+  //
+  // The RoomAware instance is shared: `active` and `bayesian.inner` are
+  // the same object, so the second call in the alternatives pass hits a
+  // stateless re-solve on the same fixes rather than a separate computation.
+  const allBases: Locator[] = [idw, nm, bfgs, mle, nearest];
+  if (config.bayesian.enabled) {
+    allBases.push(new BayesianLocator(roomAware));
+  }
 
   return { active, alternatives: allBases };
 }
@@ -136,5 +157,5 @@ export function computeDevicePosition(
     });
   }
 
-  return locator.solve(fixes);
+  return locator.solve(fixes, device.id);
 }

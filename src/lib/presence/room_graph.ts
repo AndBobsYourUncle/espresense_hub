@@ -1,5 +1,5 @@
 import type { Config, Floor } from "@/lib/config";
-import { openToId } from "@/lib/config/schema";
+import { OUTSIDE_ROOM_ID, openToId } from "@/lib/config/schema";
 
 /**
  * A directed adjacency map keyed by room id. Symmetric by construction —
@@ -8,7 +8,9 @@ import { openToId } from "@/lib/config/schema";
  *
  * Edges come from two config sources, both treated as "human-passable":
  *
- *   1. `open_to` entries on a room — explicit door / open passage.
+ *   1. `open_to` entries on a room — explicit door / open passage. Entries
+ *      may reference a real room *or* the well-known `OUTSIDE_ROOM_ID`
+ *      ("outside"), which marks an exterior door.
  *   2. `floor_area` groupings — every room sharing the same tag forms a
  *      fully-connected subgraph. Models open-plan layouts where
  *      kitchen/dining/living have no walls between them.
@@ -25,14 +27,19 @@ export function buildRoomGraph(floors: readonly Floor[]): RoomGraph {
   const allRooms = floors.flatMap((f) => f.rooms);
 
   // Resolve an `open_to` reference (which may be id OR human name) to a
-  // canonical room id.
+  // canonical room id. The reserved `OUTSIDE_ROOM_ID` always resolves to
+  // itself — it's a virtual node with no polygon, representing the
+  // outside-the-home state.
   const idByLabel = new Map<string, string>();
   for (const r of allRooms) {
     if (!r.id) continue;
     idByLabel.set(r.id, r.id);
     if (r.name) idByLabel.set(r.name, r.id);
   }
-  const resolve = (label: string): string | null => idByLabel.get(label) ?? null;
+  const resolve = (label: string): string | null => {
+    if (label === OUTSIDE_ROOM_ID) return OUTSIDE_ROOM_ID;
+    return idByLabel.get(label) ?? null;
+  };
 
   const addEdge = (a: string, b: string): void => {
     if (a === b) return;

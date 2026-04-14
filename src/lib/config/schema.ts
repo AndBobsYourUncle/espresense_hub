@@ -16,6 +16,22 @@ export function slugify(name: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
+/**
+ * Well-known room id representing "outside the home." Used in `open_to`
+ * entries to declare exterior doors — rooms with an edge to `OUTSIDE_ROOM_ID`
+ * are the only ones from which a device can transition to the outside state.
+ *
+ * One global outside exists (not per-floor) — you leave the house *from* a
+ * floor, not from a floor's private outside. Multi-floor homes still share
+ * the same outside concept.
+ */
+export const OUTSIDE_ROOM_ID = "outside";
+
+/** True iff `roomId` refers to the outside-the-home virtual state. */
+export function isOutside(roomId: string | null | undefined): boolean {
+  return roomId === OUTSIDE_ROOM_ID;
+}
+
 // ---------------- MQTT ----------------
 
 export const MqttSchema = z.object({
@@ -297,6 +313,34 @@ export const PresenceSchema = z
   })
   .prefault({});
 
+// ---------------- Bayesian room tracker ----------------
+
+/**
+ * Top-level config for the graph-aware Bayesian room tracker (Phase 3).
+ * Kept in its own block (rather than under `filtering` or `presence`)
+ * because the tracker is a standalone concept that spans multiple layers:
+ * it's a locator (visible on the map), it maintains per-device posterior
+ * state, and in the future it'll have its own HA tracker entity published
+ * alongside the raw room-level one.
+ *
+ * For now the only user-facing knob is `enabled` — the transition-model
+ * constants (stay weight, proximity σ, etc.) are hardcoded in
+ * `src/lib/locators/bayesian.ts` and surface here later if tuning ever
+ * becomes necessary.
+ */
+export const BayesianSchema = z
+  .object({
+    /**
+     * Master switch for the Bayesian tracker. When `true` (default) the
+     * tracker runs alongside the other locators and shows as an extra
+     * dot in the map's alternatives view. Set to `false` to skip the
+     * extra compute entirely — useful on low-powered hosts or when
+     * you're not interested in graph-aware smoothing.
+     */
+    enabled: z.boolean().default(true),
+  })
+  .prefault({});
+
 // ---------------- Root ----------------
 
 export const ConfigSchema = z.object({
@@ -324,6 +368,7 @@ export const ConfigSchema = z.object({
   /** Passthrough — history/DB integration is not yet implemented. Preserved as-is. */
   history: z.unknown().optional(),
   presence: PresenceSchema,
+  bayesian: BayesianSchema,
 
   floors: z.array(FloorSchema).default([]),
   nodes: z.array(NodeSchema).default([]),

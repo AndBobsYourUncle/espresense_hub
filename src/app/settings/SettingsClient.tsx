@@ -848,6 +848,22 @@ function FilteringTab({ doc, setField }: DocProps) {
       </Section>
 
       <Section
+        title="Bayesian room tracker"
+        description="Graph-aware probabilistic tracker — smooths room assignment using the open_to / floor_area adjacency graph. Visible on the map as an extra dot in the alternatives view. Service restart required to toggle."
+      >
+        <Field
+          label="Enabled"
+          hint="When on, computes a per-device posterior over rooms each message and emits a room-constrained position. Wider doors and door proximity influence transition priors. Turning off skips the compute — fine if you don't need the diagnostic view."
+        >
+          <Toggle
+            value={get<boolean>(doc, ["bayesian", "enabled"], true)}
+            onChange={(v) => setField(["bayesian", "enabled"], v)}
+            label={get<boolean>(doc, ["bayesian", "enabled"], true) ? "On" : "Off"}
+          />
+        </Field>
+      </Section>
+
+      <Section
         title="Room hysteresis"
         description="Smooths HA room-tracker flicker when a device wobbles at a wall boundary. Only affects published state — the map still shows the raw position."
       >

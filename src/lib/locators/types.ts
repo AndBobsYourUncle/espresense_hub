@@ -30,5 +30,15 @@ export interface LocatorResult {
 /** Common locator interface — all algorithms accept a list of fixes. */
 export interface Locator {
   readonly name: string;
-  solve(fixes: readonly NodeFix[]): LocatorResult | null;
+  /**
+   * Solve for the device position given its current fixes.
+   *
+   * `deviceId` is optional and provided by callers that know the owning
+   * device. Stateless locators ignore it; stateful ones (e.g. the Bayesian
+   * room tracker) key their per-device posterior state on it. Existing
+   * implementations declaring `solve(fixes)` (no second parameter) still
+   * satisfy this interface — TypeScript allows fewer parameters at the
+   * implementation than the interface declares.
+   */
+  solve(fixes: readonly NodeFix[], deviceId?: string): LocatorResult | null;
 }
