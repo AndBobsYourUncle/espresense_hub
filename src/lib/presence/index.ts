@@ -216,28 +216,27 @@ function clearDeviceHysteresis(deviceId: string): void {
 
 // ─── Zone state computation ───────────────────────────────────────────────────
 
+/** Zone state: `on` when the device is inside the zone, `off` otherwise. */
+const ZONE_PAYLOAD_ON = "on";
+const ZONE_PAYLOAD_OFF = "off";
+
 /**
- * Given a resolved location and a zone definition, compute the state string
- * to publish. For "rooms" zones: the zone label when the device is in one of
- * the listed rooms, otherwise "not_home". For "bayesian": placeholder — will
- * be implemented when the Bayesian layer is added.
+ * True iff the resolved location matches any of the zone's listed rooms,
+ * by id or name (case-insensitive). `loc.roomId == null` (device between
+ * rooms / outside all polygons) is always "not in zone."
  */
-function zoneState(
+function isDeviceInZone(
   loc: ResolvedLocation,
   zone: PresenceZone,
-): string {
-  // Match against the list of room ids/names.
-  if (loc.roomId != null) {
-    const inZone = zone.rooms.some(
-      (r) =>
-        r === loc.roomId ||
-        r === loc.roomName ||
-        r.toLowerCase() === loc.roomId?.toLowerCase() ||
-        r.toLowerCase() === loc.roomName?.toLowerCase(),
-    );
-    if (inZone) return zone.label ?? zone.id;
-  }
-  return "not_home";
+): boolean {
+  if (loc.roomId == null) return false;
+  return zone.rooms.some(
+    (r) =>
+      r === loc.roomId ||
+      r === loc.roomName ||
+      r.toLowerCase() === loc.roomId?.toLowerCase() ||
+      r.toLowerCase() === loc.roomName?.toLowerCase(),
+  );
 }
 
 /**
@@ -280,6 +279,22 @@ function discoveryTopic(
   return `${discoveryPrefix}/device_tracker/${entityId}/config`;
 }
 
+/**
+ * Zone entities live under the `binary_sensor` component (not
+ * `device_tracker`) — a zone is semantically "is this device in this
+ * area?" which reads better as an on/off binary sensor than as a
+ * string-valued tracker. Automations get the clean
+ * `binary_sensor.nick_master_suite is on` form instead of
+ * `device_tracker.nick_master_suite.state == 'Master Suite'`.
+ */
+function zoneDiscoveryTopic(
+  discoveryPrefix: string,
+  deviceId: string,
+  zoneId: string,
+): string {
+  return `${discoveryPrefix}/binary_sensor/espresense-hub-${deviceId}-${zoneId}/config`;
+}
+
 // ─── Smart (Bayesian) tracker topics ──────────────────────────────────────
 
 /**
@@ -303,31 +318,24 @@ function smartDiscoveryTopic(discoveryPrefix: string, deviceId: string): string 
 
 // ─── Discovery ───────────────────────────────────────────────────────────────
 
+/**
+ * Publish the HA discovery config for the default per-device room tracker
+ * (device_tracker entity whose state is "room id / floor id / not_home").
+ * Idempotent per process: dedup by device, publish once.
+ */
 async function ensureDiscovery(
   deviceId: string,
   deviceName: string,
   discoveryPrefix: string,
-  zoneId?: string,
-  zoneLabel?: string,
 ): Promise<void> {
-  const key = `${deviceId}::${zoneId ?? "__default__"}`;
+  const key = `${deviceId}::__default__`;
   const s = state();
   if (s.sentDiscovery.has(key)) return;
 
-  // HA forms the entity_id as "{device_name}_{entity_name}" when a device
-  // block is present, so the entity name should describe the tracker type,
-  // not repeat the device name. Default tracker = "Location";
-  // zone trackers = the zone label (e.g. "Master Suite").
-  const name = zoneLabel ?? (zoneId ? zoneId : "Location");
-
-  const uniqueId = zoneId
-    ? `espresense-hub-${deviceId}-${zoneId}`
-    : `espresense-hub-${deviceId}`;
-
   const payload = {
-    name,
-    unique_id: uniqueId,
-    state_topic: stateTopic(deviceId, zoneId),
+    name: "Location",
+    unique_id: `espresense-hub-${deviceId}`,
+    state_topic: stateTopic(deviceId),
     json_attributes_topic: attributesTopic(deviceId),
     status_topic: "espresense/hub/status",
     source_type: "bluetooth",
@@ -341,13 +349,67 @@ async function ensureDiscovery(
   };
 
   await publishRaw(
-    discoveryTopic(discoveryPrefix, deviceId, zoneId),
+    discoveryTopic(discoveryPrefix, deviceId),
     JSON.stringify(payload),
     { retain: true, qos: 1 },
   );
   // Mark sent only AFTER a successful publish — otherwise a transient
   // failure silently poisons this key for the rest of the process
   // lifetime and the entity never appears in HA.
+  s.sentDiscovery.add(key);
+}
+
+/**
+ * Publish HA discovery for a zone as a `binary_sensor` entity with
+ * `device_class: occupancy`. State topic stays at the same path zones
+ * have always used, but the payloads are now `"on"` / `"off"`.
+ *
+ * Also retires the legacy `device_tracker`-based zone entity (published
+ * by earlier versions) by sending an empty retained payload to its old
+ * discovery topic — HA removes the orphan entity on receipt.
+ */
+async function ensureZoneDiscovery(
+  deviceId: string,
+  deviceName: string,
+  discoveryPrefix: string,
+  zoneId: string,
+  zoneLabel: string | undefined,
+): Promise<void> {
+  const key = `${deviceId}::zone::${zoneId}`;
+  const s = state();
+  if (s.sentDiscovery.has(key)) return;
+
+  // Step 1: retire the legacy device_tracker zone entity if we published
+  // one in a previous release. Empty retained payload = "entity removed"
+  // for HA's MQTT integration.
+  await publishRaw(
+    discoveryTopic(discoveryPrefix, deviceId, zoneId),
+    "",
+    { retain: true, qos: 1 },
+  );
+
+  // Step 2: publish the new binary_sensor discovery.
+  const payload = {
+    name: zoneLabel ?? zoneId,
+    unique_id: `espresense-hub-${deviceId}-${zoneId}`,
+    state_topic: stateTopic(deviceId, zoneId),
+    payload_on: ZONE_PAYLOAD_ON,
+    payload_off: ZONE_PAYLOAD_OFF,
+    device_class: "occupancy",
+    device: {
+      name: deviceName,
+      manufacturer: "ESPresense",
+      model: "Hub",
+      identifiers: [`espresense-hub-${deviceId}`],
+    },
+    origin: { name: "ESPresense Hub" },
+  };
+
+  await publishRaw(
+    zoneDiscoveryTopic(discoveryPrefix, deviceId, zoneId),
+    JSON.stringify(payload),
+    { retain: true, qos: 1 },
+  );
   s.sentDiscovery.add(key);
 }
 
@@ -443,16 +505,16 @@ export async function publishDeviceAway({
 
   for (const zone of config.presence.zones) {
     const zKey = `${deviceId}::${zone.id}`;
-    if (s.lastState.get(zKey) !== "not_home") {
-      s.lastState.set(zKey, "not_home");
-      await ensureDiscovery(
+    if (s.lastState.get(zKey) !== ZONE_PAYLOAD_OFF) {
+      s.lastState.set(zKey, ZONE_PAYLOAD_OFF);
+      await ensureZoneDiscovery(
         deviceId,
         deviceName,
         discoveryPrefix,
         zone.id,
         zone.label,
       );
-      await publishRaw(stateTopic(deviceId, zone.id), "not_home", {
+      await publishRaw(stateTopic(deviceId, zone.id), ZONE_PAYLOAD_OFF, {
         retain: false,
         qos: 1,
       });
@@ -586,11 +648,17 @@ export async function publishPresence({
     }
   }
 
-  // ── Zone trackers ─────────────────────────────────────────────────────────
+  // ── Zone binary sensors ──────────────────────────────────────────────────
+  // Each zone is published as a binary_sensor with device_class:occupancy.
+  // `on` = device is in one of the zone's rooms; `off` = it isn't. The
+  // underlying room assignment comes from `zoneLoc`, which auto-upgrades
+  // to the Bayesian room when that tracker is enabled.
   for (const zone of config.presence.zones) {
-    const zState = zoneState(zoneLoc, zone);
+    const zState = isDeviceInZone(zoneLoc, zone)
+      ? ZONE_PAYLOAD_ON
+      : ZONE_PAYLOAD_OFF;
     const zKey = `${deviceId}::${zone.id}`;
-    await ensureDiscovery(
+    await ensureZoneDiscovery(
       deviceId,
       deviceName,
       discoveryPrefix,
