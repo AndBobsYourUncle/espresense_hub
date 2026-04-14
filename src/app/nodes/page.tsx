@@ -1,3 +1,4 @@
+import AutoRefresh from "@/components/AutoRefresh";
 import PageHeader from "@/components/PageHeader";
 import {
   ConfigNotFoundError,
@@ -99,6 +100,7 @@ export default async function NodesPage() {
 
   return (
     <>
+      <AutoRefresh intervalMs={5000} />
       <PageHeader
         title="Nodes"
         description={`${onlineCount} / ${rows.length} online`}

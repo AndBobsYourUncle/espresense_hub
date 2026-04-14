@@ -1,3 +1,4 @@
+import AutoRefresh from "@/components/AutoRefresh";
 import PageHeader from "@/components/PageHeader";
 import { getStore, type DeviceState } from "@/lib/state/store";
 
@@ -56,6 +57,7 @@ export default async function DevicesPage() {
 
   return (
     <>
+      <AutoRefresh intervalMs={5000} />
       <PageHeader title="Devices" description={`${rows.length} tracked`} />
       <main className="flex-1 min-h-0 p-6 overflow-auto">
         {rows.length === 0 ? (
