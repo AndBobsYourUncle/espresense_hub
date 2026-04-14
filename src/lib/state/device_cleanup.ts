@@ -54,16 +54,18 @@ export async function runDeviceCleanup(
 
     if (age > awayMs && device.position != null) {
       store.setDevicePosition(deviceId, null);
-      await publishDeviceAway({
-        deviceId,
-        deviceName: device.name ?? deviceId,
-        config,
-      }).catch((err) => {
-        console.error(
-          `[cleanup] away publish failed for ${deviceId}:`,
-          (err as Error).message,
-        );
-      });
+      if (config.publish_presence) {
+        await publishDeviceAway({
+          deviceId,
+          deviceName: device.name ?? deviceId,
+          config,
+        }).catch((err) => {
+          console.error(
+            `[cleanup] away publish failed for ${deviceId}:`,
+            (err as Error).message,
+          );
+        });
+      }
     }
   }
 

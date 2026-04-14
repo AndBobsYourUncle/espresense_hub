@@ -28,15 +28,6 @@ export const MqttSchema = z.object({
   discovery_topic: z.string().default("homeassistant"),
 });
 
-// ---------------- GPS ----------------
-
-export const GpsSchema = z.object({
-  latitude: z.number().nullable().optional(),
-  longitude: z.number().nullable().optional(),
-  elevation: z.number().nullable().optional(),
-  rotation: z.number().nullable().optional(),
-  report: z.boolean().default(false),
-});
 
 // ---------------- Map ----------------
 
@@ -112,49 +103,6 @@ export const OptimizationSchema = z
   })
   .prefault({});
 
-// ---------------- Locators ----------------
-
-const WeightingSchema = z.object({
-  algorithm: z
-    .enum(["equal", "linear", "gaussian", "exponential"])
-    .default("gaussian"),
-  props: z.record(z.string(), z.number()).default({}),
-});
-
-const FlooredLocatorSchema = z.object({
-  enabled: z.boolean().default(false),
-  floors: z.array(z.string()).nullable().optional(),
-});
-
-export const LocatorsSchema = z
-  .object({
-    nadaraya_watson: FlooredLocatorSchema.extend({
-      bandwidth: z.number().default(0.5),
-      kernel: z.string().default("gaussian"),
-    }).prefault({}),
-    nelder_mead: FlooredLocatorSchema.extend({
-      weighting: WeightingSchema.prefault({}),
-    }).prefault({}),
-    bfgs: FlooredLocatorSchema.extend({
-      weighting: WeightingSchema.prefault({}),
-    }).prefault({}),
-    mle: FlooredLocatorSchema.extend({
-      weighting: WeightingSchema.prefault({}),
-    }).prefault({}),
-    multi_floor: z
-      .object({
-        enabled: z.boolean().default(false),
-        weighting: WeightingSchema.prefault({}),
-      })
-      .prefault({}),
-    nearest_node: z
-      .object({
-        enabled: z.boolean().default(true),
-        max_distance: z.number().nullable().optional(),
-      })
-      .prefault({}),
-  })
-  .prefault({});
 
 // ---------------- Filtering ----------------
 
@@ -211,15 +159,6 @@ export const FilteringSchema = z
   })
   .prefault({});
 
-// ---------------- History ----------------
-
-export const HistorySchema = z
-  .object({
-    enabled: z.boolean().default(false),
-    db: z.string().default("sqlite:///espresense.db"),
-    expire_after: z.string().default("24h"),
-  })
-  .prefault({});
 
 // ---------------- Floors / Rooms ----------------
 
@@ -364,17 +303,28 @@ export const PresenceSchema = z
 
 export const ConfigSchema = z.object({
   mqtt: MqttSchema.prefault({}),
-  gps: GpsSchema.prefault({}),
+  /** Passthrough — GPS integration is not yet implemented. Preserved as-is. */
+  gps: z.unknown().optional(),
   map: MapSchema.prefault({}),
 
   timeout: z.number().int().default(30),
   away_timeout: z.number().int().default(120),
   device_retention: z.string().default("30d"),
+  /**
+   * When false, the hub skips all outbound MQTT presence publishing (state
+   * topics, attributes, HA discovery). Everything else — solving, calibration,
+   * the local UI — keeps running normally. Useful for running a local dev
+   * instance alongside a production homelab hub without the two fighting over
+   * the same HA entities. Default true (publishing on).
+   */
+  publish_presence: z.boolean().default(true),
 
   optimization: OptimizationSchema,
-  locators: LocatorsSchema,
+  /** Passthrough — locator config is not consumed at runtime. Preserved as-is. */
+  locators: z.unknown().optional(),
   filtering: FilteringSchema,
-  history: HistorySchema,
+  /** Passthrough — history/DB integration is not yet implemented. Preserved as-is. */
+  history: z.unknown().optional(),
   presence: PresenceSchema,
 
   floors: z.array(FloorSchema).default([]),

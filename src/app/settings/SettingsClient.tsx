@@ -64,7 +64,7 @@ const TABS: Array<{
   icon: typeof Settings2;
   hint: string;
 }> = [
-  { key: "general", label: "General", icon: Settings2, hint: "Timeouts, GPS, history" },
+  { key: "general", label: "General", icon: Settings2, hint: "Timeouts and retention" },
   { key: "mqtt", label: "MQTT", icon: Radio, hint: "Broker connection" },
   { key: "filtering", label: "Filtering", icon: SlidersHorizontal, hint: "Position smoothing, Kalman, optimization" },
   { key: "map", label: "Map display", icon: MapIcon, hint: "Floor plan rendering" },
@@ -628,6 +628,22 @@ function GeneralTab({ doc, setField }: DocProps) {
   return (
     <>
       <Section
+        title="HA presence publishing"
+        description="Disable to run the hub locally without pushing state to Home Assistant. Solving, calibration, and the local UI all keep running — only the outbound MQTT state/attributes/discovery messages are suppressed."
+      >
+        <Field
+          label="Publish presence"
+          hint="Turn off when running a local dev instance alongside a production hub. No restart needed — takes effect on the next position update."
+        >
+          <Toggle
+            value={get<boolean>(doc, ["publish_presence"], true)}
+            onChange={(v) => setField(["publish_presence"], v)}
+            label={get<boolean>(doc, ["publish_presence"], true) ? "On" : "Off (dry-run mode)"}
+          />
+        </Field>
+      </Section>
+
+      <Section
         title="Timeouts and retention"
         description="Restart not required — applied on the next solve / cleanup tick."
       >
@@ -667,93 +683,6 @@ function GeneralTab({ doc, setField }: DocProps) {
         </Field>
       </Section>
 
-      <Section
-        title="GPS"
-        description="Optional: ground-truth GPS coordinates for the home origin. Used by integrations that want to map the local floor coordinates to absolute lat/long. Leave blank if not needed."
-      >
-        <Field label="Latitude">
-          <NumberInput
-            value={get<number | undefined>(doc, ["gps", "latitude"], undefined)}
-            onChange={(v) => setField(["gps", "latitude"], v)}
-            step={0.000001}
-            min={-90}
-            max={90}
-            unit="°"
-          />
-        </Field>
-        <Field label="Longitude">
-          <NumberInput
-            value={get<number | undefined>(doc, ["gps", "longitude"], undefined)}
-            onChange={(v) => setField(["gps", "longitude"], v)}
-            step={0.000001}
-            min={-180}
-            max={180}
-            unit="°"
-          />
-        </Field>
-        <Field label="Elevation" hint="Above sea level, meters.">
-          <NumberInput
-            value={get<number | undefined>(doc, ["gps", "elevation"], undefined)}
-            onChange={(v) => setField(["gps", "elevation"], v)}
-            step={1}
-            unit="m"
-          />
-        </Field>
-        <Field
-          label="Rotation"
-          hint="Degrees from north for the local floor coordinate system. 0 = +x is east, 90 = +x is north."
-        >
-          <NumberInput
-            value={get<number | undefined>(doc, ["gps", "rotation"], undefined)}
-            onChange={(v) => setField(["gps", "rotation"], v)}
-            step={1}
-            min={-360}
-            max={360}
-            unit="°"
-          />
-        </Field>
-        <Field
-          label="Report"
-          hint="Publish the computed lat/long for each device alongside its local position."
-        >
-          <Toggle
-            value={get<boolean>(doc, ["gps", "report"], false)}
-            onChange={(v) => setField(["gps", "report"], v)}
-          />
-        </Field>
-      </Section>
-
-      <Section
-        title="History"
-        description="Persist position fixes to a SQL database for later analysis. Disabled by default."
-      >
-        <Field label="Enabled">
-          <Toggle
-            value={get<boolean>(doc, ["history", "enabled"], false)}
-            onChange={(v) => setField(["history", "enabled"], v)}
-          />
-        </Field>
-        <Field
-          label="Database URL"
-          hint="SQLAlchemy-style connection string. Default sqlite:///espresense.db keeps everything in a local file."
-        >
-          <TextInput
-            value={get<string>(doc, ["history", "db"], "sqlite:///espresense.db")}
-            onChange={(v) => setField(["history", "db"], v)}
-            placeholder="sqlite:///espresense.db"
-          />
-        </Field>
-        <Field
-          label="Expire after"
-          hint="Drop history older than this duration. '24h', '7d', '30d', etc."
-        >
-          <TextInput
-            value={get<string>(doc, ["history", "expire_after"], "24h")}
-            onChange={(v) => setField(["history", "expire_after"], v)}
-            placeholder="24h"
-          />
-        </Field>
-      </Section>
     </>
   );
 }
@@ -1324,12 +1253,18 @@ function NodesTab({ doc, setField, addToList, deleteAt }: DocListProps) {
   );
 }
 
+type OpenToEntry = string | { id: string; door?: [number, number] };
+
 interface RoomData {
   id?: string;
   name?: string;
   points?: Array<[number, number]>;
-  open_to?: string[];
+  open_to?: OpenToEntry[];
   floor_area?: string;
+}
+
+function openToEntryId(e: OpenToEntry): string {
+  return typeof e === "string" ? e : e.id;
 }
 
 function RoomsTab({ doc, setField, addToList, deleteAt }: DocListProps) {
@@ -1371,7 +1306,15 @@ function RoomsTab({ doc, setField, addToList, deleteAt }: DocListProps) {
             ) : (
               rooms.map((r, ri) => {
                 const ptCount = r.points?.length ?? 0;
-                const openTo = r.open_to ?? [];
+                const rawOpenTo = r.open_to ?? [];
+                // Extract plain ids for display; preserve object entries (door
+                // positions) when writing back so map-edited door data isn't lost.
+                const openToIds = rawOpenTo.map(openToEntryId);
+                const objsByid = new Map(
+                  rawOpenTo
+                    .filter((e): e is { id: string; door?: [number, number] } => typeof e === "object" && e !== null)
+                    .map((e) => [e.id, e]),
+                );
                 return (
                   <ListRow
                     key={`r-${fi}-${ri}`}
@@ -1413,13 +1356,15 @@ function RoomsTab({ doc, setField, addToList, deleteAt }: DocListProps) {
                     </MiniField>
                     <MiniField
                       label="Open to"
-                      hint="Comma-separated list of room names this room has a doorway to. Bidirectional."
+                      hint="Comma-separated list of room names this room has a doorway to. Bidirectional. Door positions are set via the map tool."
                     >
                       <CommaList
-                        value={openTo}
-                        onChange={(arr) =>
-                          setField(["floors", fi, "rooms", ri, "open_to"], arr)
-                        }
+                        value={openToIds}
+                        onChange={(arr) => {
+                          // Re-attach any existing door objects for ids still present.
+                          const merged = (arr ?? []).map((id) => objsByid.get(id) ?? id);
+                          setField(["floors", fi, "rooms", ri, "open_to"], merged.length > 0 ? merged : null);
+                        }}
                         placeholder="Hallway, Kitchen"
                       />
                     </MiniField>

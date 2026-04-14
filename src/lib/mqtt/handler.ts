@@ -349,15 +349,18 @@ export function attachHandlers(client: MqttClient, config: Config): void {
         });
 
         // Publish HA MQTT presence — fire and forget so MQTT latency
-        // doesn't block the solve loop.
-        publishPresence({
-          deviceId: device.id,
-          deviceName: device.name ?? device.id,
-          position: result,
-          config,
-        }).catch((err) => {
-          console.error("[presence] publish failed:", (err as Error).message);
-        });
+        // doesn't block the solve loop. Skipped when publish_presence is off
+        // (local dev / dry-run mode).
+        if (config.publish_presence) {
+          publishPresence({
+            deviceId: device.id,
+            deviceName: device.name ?? device.id,
+            position: result,
+            config,
+          }).catch((err) => {
+            console.error("[presence] publish failed:", (err as Error).message);
+          });
+        }
 
         // Update per-locator comparison stats: distance from each
         // alternative's output to ours (after our active position has
