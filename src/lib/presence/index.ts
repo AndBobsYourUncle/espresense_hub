@@ -2,6 +2,7 @@ import type { Config } from "@/lib/config";
 import type { PresenceZone } from "@/lib/config/schema";
 import { findRoom } from "@/lib/locators/room_aware";
 import { publishRaw } from "@/lib/mqtt/client";
+import { areAdjacent, getRoomGraph } from "./room_graph";
 
 // ─── Runtime state ────────────────────────────────────────────────────────────
 
@@ -117,11 +118,23 @@ export function resolveLocation(
 
 /**
  * Room-hysteresis-aware wrapper over `resolveLocation`. Requires a device to
- * register in a new room for at least `filtering.room_stability_ms` before
- * the returned location flips — wobbles inside that window hold the previous
+ * register in a new room for at least a configurable dwell window before the
+ * returned location flips — wobbles inside that window hold the previous
  * committed room instead.
  *
- * When the threshold is 0 (default), behavior is identical to `resolveLocation`.
+ * Two thresholds are consulted:
+ *
+ *   - `filtering.room_stability_ms` — used for transitions to rooms adjacent
+ *     to the committed one (via `open_to` or shared `floor_area`). Standard
+ *     boundary-flicker suppression.
+ *
+ *   - `filtering.room_teleport_stability_ms` (Phase 2) — used when the
+ *     candidate room isn't graph-adjacent. A person can't walk through a
+ *     wall, so this demands much stronger evidence (typically 5–10×
+ *     longer). Set to 0 to disable the distinction — non-adjacent
+ *     transitions then use the regular threshold.
+ *
+ * When both thresholds are 0, behavior is identical to `resolveLocation`.
  * Per-device state is stored in the module-level singleton and cleared via
  * `clearDeviceHysteresis` when a device goes away.
  */
@@ -131,8 +144,10 @@ function resolveLocationWithHysteresis(
   config: Config,
 ): ResolvedLocation {
   const raw = resolveLocation(pos, config);
-  const threshold = config.filtering.room_stability_ms ?? 0;
-  if (threshold <= 0) return raw;
+  const adjacentThreshold = config.filtering.room_stability_ms ?? 0;
+  const teleportThreshold = config.filtering.room_teleport_stability_ms ?? 0;
+  // If both are zero, hysteresis is fully off. No state to track.
+  if (adjacentThreshold <= 0 && teleportThreshold <= 0) return raw;
 
   const s = state();
   const existing = s.roomHysteresis.get(deviceId);
@@ -161,6 +176,29 @@ function resolveLocationWithHysteresis(
   }
 
   // Same candidate as last tick — has it dwelled long enough to promote?
+  // Threshold depends on whether the transition is graph-adjacent.
+  const committedRoomId = existing.committed.roomId;
+  const candidateRoomId = raw.roomId;
+  let threshold = adjacentThreshold;
+  if (
+    teleportThreshold > 0 &&
+    committedRoomId != null &&
+    candidateRoomId != null
+  ) {
+    const graph = getRoomGraph(config);
+    if (!areAdjacent(graph, committedRoomId, candidateRoomId)) {
+      // Non-adjacent transitions use the longer "teleport" threshold. If
+      // `adjacentThreshold` is 0 (disabled) but teleport is set, the
+      // teleport threshold still gates these — more conservative, not less.
+      threshold = Math.max(adjacentThreshold, teleportThreshold);
+    }
+  }
+  if (threshold <= 0) {
+    // Adjacent transition with `room_stability_ms` disabled — commit now.
+    existing.committed = raw;
+    existing.candidate = null;
+    return raw;
+  }
   if (now - existing.candidate.since >= threshold) {
     existing.committed = raw;
     existing.candidate = null;

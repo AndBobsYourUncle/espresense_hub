@@ -125,6 +125,25 @@ export const FilteringSchema = z
      * Bayesian locator once implemented.
      */
     room_stability_ms: z.number().int().min(0).default(0),
+    /**
+     * Room-hysteresis threshold, in milliseconds, specifically for
+     * *non-adjacent* room transitions — i.e. when the candidate room
+     * isn't connected to the currently-committed room via `open_to` or
+     * shared `floor_area`. Getting there would require teleporting
+     * through a wall, so we demand much stronger evidence.
+     *
+     * Typical hallucinations (single-tick RSSI noise producing a distant
+     * room) won't survive more than a few seconds and get rejected
+     * entirely. Legitimate fast walks through unseen intermediate rooms
+     * eventually commit after this threshold.
+     *
+     * Only active when > 0. When 0 (default), non-adjacent transitions
+     * use the regular `room_stability_ms` threshold just like any other
+     * transition. Recommended value: 8000 ms.
+     *
+     * Phase 2 of the graph-aware tracker work.
+     */
+    room_teleport_stability_ms: z.number().int().min(0).default(0),
   })
   .prefault({});
 

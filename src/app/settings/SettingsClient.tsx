@@ -849,16 +849,30 @@ function FilteringTab({ doc, setField }: DocProps) {
 
       <Section
         title="Room hysteresis"
-        description="Smooths HA room-tracker flicker when a device wobbles at a wall boundary. Only affects published state — the map still shows the raw position. Service restart required."
+        description="Smooths HA room-tracker flicker when a device wobbles at a wall boundary. Only affects published state — the map still shows the raw position."
       >
         <Field
           label="Room stability window"
-          hint="Require a device to register in a new room for at least this many milliseconds before the HA state flips. 0 = off. Try 1000–2000 ms for a balanced value; higher to be stricter at the cost of slower transitions."
+          hint="Require a device to register in a new room for at least this many milliseconds before the HA state flips. Used for graph-adjacent transitions (rooms connected by a door or open floor area). 0 = off. Try 1000–2000 ms for a balanced value; higher to be stricter at the cost of slower transitions."
         >
           <NumberInput
             value={get<number>(doc, ["filtering", "room_stability_ms"], 0)}
             onChange={(v) => setField(["filtering", "room_stability_ms"], v)}
             step={100}
+            min={0}
+            unit="ms"
+          />
+        </Field>
+        <Field
+          label="Teleport stability window"
+          hint="Longer dwell required for transitions to NON-adjacent rooms — where getting there would require walking through a wall. Rejects distant-room RSSI hallucinations that the base stability window would otherwise let through. 0 = off (treat all transitions the same). Recommended: 8000 ms."
+        >
+          <NumberInput
+            value={get<number>(doc, ["filtering", "room_teleport_stability_ms"], 0)}
+            onChange={(v) =>
+              setField(["filtering", "room_teleport_stability_ms"], v)
+            }
+            step={500}
             min={0}
             unit="ms"
           />

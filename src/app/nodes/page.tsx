@@ -81,6 +81,12 @@ export default async function NodesPage() {
   }
   for (const state of store.nodes.values()) {
     if (seen.has(state.id)) continue;
+    // Only surface unconfigured nodes when they're currently online — this
+    // preserves the discovery affordance (a newly-flashed ESPresense on the
+    // mesh shows up as "unconfigured" so the user can add it to config) while
+    // hiding retained-LWT zombies from nodes that have since been removed or
+    // renamed and are just lingering on the broker as offline tombstones.
+    if (!state.online) continue;
     rows.push({
       id: state.id,
       name: state.id,
