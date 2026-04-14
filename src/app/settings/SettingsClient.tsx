@@ -848,6 +848,24 @@ function FilteringTab({ doc, setField }: DocProps) {
       </Section>
 
       <Section
+        title="Room hysteresis"
+        description="Smooths HA room-tracker flicker when a device wobbles at a wall boundary. Only affects published state — the map still shows the raw position. No restart needed."
+      >
+        <Field
+          label="Room stability window"
+          hint="Require a device to register in a new room for at least this many milliseconds before the HA state flips. 0 = off. Try 1000–2000 ms for a balanced value; higher to be stricter at the cost of slower transitions."
+        >
+          <NumberInput
+            value={get<number>(doc, ["filtering", "room_stability_ms"], 0)}
+            onChange={(v) => setField(["filtering", "room_stability_ms"], v)}
+            step={100}
+            min={0}
+            unit="ms"
+          />
+        </Field>
+      </Section>
+
+      <Section
         title="Auto-apply"
         description="Background loop that pushes small calibration deltas to firmware over MQTT. Per-node rate limit (10 min) and minimum delta gate every push. Service restart required."
       >

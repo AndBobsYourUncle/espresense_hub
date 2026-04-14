@@ -156,6 +156,21 @@ export const FilteringSchema = z
      */
     smoothing_weight: z.number().default(0.4),
     motion_sigma: z.number().default(2.0),
+    /**
+     * Room-hysteresis threshold, in milliseconds. When > 0, the HA presence
+     * tracker requires a device to register in a new room for at least this
+     * long before flipping the published state. Kills boundary flicker —
+     * especially useful when a device is wobbling right at a wall edge and
+     * the locator alternates between two rooms on consecutive ticks.
+     *
+     * Only affects HA publishing. The raw position shown on the map is
+     * unaffected (so you can still see the wobble for diagnostic purposes).
+     *
+     * Default 0 (off) — opt in by setting to ~1500 for a balanced value.
+     * Phase 1 of the graph-aware tracker work; will be superseded by the
+     * Bayesian locator once implemented.
+     */
+    room_stability_ms: z.number().int().min(0).default(0),
   })
   .prefault({});
 

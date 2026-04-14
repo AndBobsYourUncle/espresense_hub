@@ -17,6 +17,19 @@ interface PresenceState {
   lastState: Map<string, string>;
   /** Discovery messages already sent this session. */
   sentDiscovery: Set<string>;
+  /**
+   * Per-device room hysteresis. `committed` is the currently-published
+   * location for the device; `candidate` is a pending new location we've
+   * started seeing but haven't yet committed to (must accumulate
+   * `room_stability_ms` worth of consistent readings before promotion).
+   */
+  roomHysteresis: Map<
+    string,
+    {
+      committed: ResolvedLocation;
+      candidate: { loc: ResolvedLocation; since: number } | null;
+    }
+  >;
 }
 
 const globalForPresence = globalThis as unknown as {
@@ -28,7 +41,12 @@ function state(): PresenceState {
     globalForPresence.__espresensePresenceState = {
       lastState: new Map(),
       sentDiscovery: new Set(),
+      roomHysteresis: new Map(),
     };
+  }
+  // Back-compat: older singletons may exist without the hysteresis map.
+  if (!globalForPresence.__espresensePresenceState.roomHysteresis) {
+    globalForPresence.__espresensePresenceState.roomHysteresis = new Map();
   }
   return globalForPresence.__espresensePresenceState;
 }
@@ -97,6 +115,67 @@ export function resolveLocation(
     floorId: floorFallback?.floorId ?? null,
     floorName: floorFallback?.floorName ?? null,
   };
+}
+
+/**
+ * Room-hysteresis-aware wrapper over `resolveLocation`. Requires a device to
+ * register in a new room for at least `filtering.room_stability_ms` before
+ * the returned location flips — wobbles inside that window hold the previous
+ * committed room instead.
+ *
+ * When the threshold is 0 (default), behavior is identical to `resolveLocation`.
+ * Per-device state is stored in the module-level singleton and cleared via
+ * `clearDeviceHysteresis` when a device goes away.
+ */
+function resolveLocationWithHysteresis(
+  deviceId: string,
+  pos: { x: number; y: number; z: number },
+  config: Config,
+): ResolvedLocation {
+  const raw = resolveLocation(pos, config);
+  const threshold = config.filtering.room_stability_ms ?? 0;
+  if (threshold <= 0) return raw;
+
+  const s = state();
+  const existing = s.roomHysteresis.get(deviceId);
+  const now = Date.now();
+
+  // First sighting — commit immediately. Nothing to smooth.
+  if (!existing) {
+    s.roomHysteresis.set(deviceId, { committed: raw, candidate: null });
+    return raw;
+  }
+
+  // Same room as committed — clear any candidate; refresh floor info in case
+  // the device crossed a floor boundary without changing roomId (unlikely but
+  // cheap to handle).
+  if (raw.roomId === existing.committed.roomId) {
+    existing.candidate = null;
+    existing.committed = raw;
+    return raw;
+  }
+
+  // Different room than committed. Either start a new candidate or keep
+  // accumulating dwell time on the existing one.
+  if (existing.candidate === null || existing.candidate.loc.roomId !== raw.roomId) {
+    existing.candidate = { loc: raw, since: now };
+    return existing.committed;
+  }
+
+  // Same candidate as last tick — has it dwelled long enough to promote?
+  if (now - existing.candidate.since >= threshold) {
+    existing.committed = raw;
+    existing.candidate = null;
+    return raw;
+  }
+
+  // Still within the hold window — keep publishing committed.
+  return existing.committed;
+}
+
+/** Clear hysteresis state for a device (called when a device goes away). */
+function clearDeviceHysteresis(deviceId: string): void {
+  state().roomHysteresis.delete(deviceId);
 }
 
 // ─── Zone state computation ───────────────────────────────────────────────────
@@ -237,6 +316,10 @@ export async function publishDeviceAway({
   const discoveryPrefix = config.mqtt.discovery_topic ?? "homeassistant";
   const s = state();
 
+  // The device is gone — clear hysteresis so the next sighting commits
+  // immediately rather than holding a stale "committed" room over the gap.
+  clearDeviceHysteresis(deviceId);
+
   const defKey = `${deviceId}::__default__`;
   if (s.lastState.get(defKey) !== "not_home") {
     s.lastState.set(defKey, "not_home");
@@ -295,7 +378,7 @@ export async function publishPresence({
   config,
 }: PresencePublishInput): Promise<void> {
   const discoveryPrefix = config.mqtt.discovery_topic ?? "homeassistant";
-  const loc = resolveLocation(position, config);
+  const loc = resolveLocationWithHysteresis(deviceId, position, config);
   const s = state();
 
   // ── Attributes (always publish — position may have moved within a room) ──
