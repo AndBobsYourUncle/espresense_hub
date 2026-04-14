@@ -9,7 +9,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import type { Room } from "@/lib/config";
-import { openToId, openToDoor } from "@/lib/config/schema";
+import { openToId, openToDoor, openToWidth } from "@/lib/config/schema";
 import { useMapTool } from "./MapToolProvider";
 
 /** Resolve a label (id or name) to the canonical room id. */
@@ -36,6 +36,12 @@ interface RoomRelationsContextValue {
   draftOpenTo: string[];
   /** Draft door positions keyed by connected room id. */
   draftDoors: Record<string, [number, number]>;
+  /**
+   * Draft door widths keyed by connected room id, in metres. Missing key =
+   * use the default (~0.8 m standard interior door). Override for wider
+   * openings (sliding glass, archways, etc.).
+   */
+  draftWidths: Record<string, number>;
   /** Draft value for `floor_area` tag. */
   draftFloorArea: string;
   /**
@@ -55,6 +61,8 @@ interface RoomRelationsContextValue {
   setFloorArea: (val: string) => void;
   /** Record or clear a door position for a connected room. Pass null to remove. */
   setDoor: (roomId: string, pos: [number, number] | null) => void;
+  /** Record or clear a door width override for a connected room. Pass null to clear. */
+  setWidth: (roomId: string, width: number | null) => void;
   /** Enter door-placement mode for a connected room. */
   startDoorPlacing: (roomId: string) => void;
   /** Exit door-placement mode without placing. */
@@ -88,6 +96,7 @@ export default function RoomRelationsProvider({
   const [editingRoomName, setEditingRoomName] = useState<string | null>(null);
   const [draftOpenTo, setDraftOpenTo] = useState<string[]>([]);
   const [draftDoors, setDraftDoors] = useState<Record<string, [number, number]>>({});
+  const [draftWidths, setDraftWidths] = useState<Record<string, number>>({});
   const [draftFloorArea, setDraftFloorArea] = useState<string>("");
   const [doorPlacingForRoom, setDoorPlacingForRoom] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -105,6 +114,7 @@ export default function RoomRelationsProvider({
     setEditingRoomName(null);
     setDraftOpenTo([]);
     setDraftDoors({});
+    setDraftWidths({});
     setDraftFloorArea("");
     setDoorPlacingForRoom(null);
     setInitialReverseRefs([]);
@@ -120,28 +130,34 @@ export default function RoomRelationsProvider({
     const id = room.id ?? null;
     if (!id) return;
 
-    // Normalize own open_to labels to room IDs, and collect any stored door positions.
+    // Normalize own open_to labels to room IDs, and collect any stored door
+    // positions and width overrides.
     const ownOpenTo = new Set<string>();
     const doors: Record<string, [number, number]> = {};
+    const widths: Record<string, number> = {};
     for (const entry of room.open_to ?? []) {
       const resolvedId = resolveRoomId(openToId(entry), allRooms);
       ownOpenTo.add(resolvedId);
       const door = openToDoor(entry);
       if (door) doors[resolvedId] = door;
+      const width = openToWidth(entry);
+      if (width != null) widths[resolvedId] = width;
     }
 
     // Find rooms that list this room in THEIR open_to (reverse references).
-    // Also pull in any door position stored on their side.
+    // Also pull in any door position or width stored on their side.
     const reverseRefs: string[] = [];
     for (const r of allRooms) {
       if (!r.id || r.id === id) continue;
       for (const entry of r.open_to ?? []) {
         if (resolveRoomId(openToId(entry), allRooms) !== id) continue;
         reverseRefs.push(r.id);
-        // Mirror the door position if the other room stored it and we don't
-        // already have one from our own open_to.
+        // Mirror the door position/width if the other room stored them and
+        // we don't already have our own from our side of the edge.
         const door = openToDoor(entry);
         if (door && !doors[r.id]) doors[r.id] = door;
+        const width = openToWidth(entry);
+        if (width != null && widths[r.id] == null) widths[r.id] = width;
         break;
       }
     }
@@ -157,6 +173,7 @@ export default function RoomRelationsProvider({
     setEditingRoomName(room.name ?? id);
     setDraftOpenTo(effective);
     setDraftDoors(doors);
+    setDraftWidths(widths);
     setInitialReverseRefs(reverseRefs);
     setDraftFloorArea(room.floor_area ?? "");
     setDoorPlacingForRoom(null);
@@ -166,10 +183,16 @@ export default function RoomRelationsProvider({
   const toggleOpenTo = useCallback((roomId: string) => {
     setDraftOpenTo((prev) => {
       if (prev.includes(roomId)) {
-        // Removing connection — clear its door position too.
+        // Removing connection — clear its door position and width too.
         setDraftDoors((d) => {
           if (!d[roomId]) return d;
           const next = { ...d };
+          delete next[roomId];
+          return next;
+        });
+        setDraftWidths((w) => {
+          if (w[roomId] == null) return w;
+          const next = { ...w };
           delete next[roomId];
           return next;
         });
@@ -194,7 +217,29 @@ export default function RoomRelationsProvider({
       }
       return { ...prev, [roomId]: pos };
     });
+    // Clearing the door also drops any width override — width has no
+    // meaning without a placement.
+    if (pos === null) {
+      setDraftWidths((prev) => {
+        if (prev[roomId] == null) return prev;
+        const next = { ...prev };
+        delete next[roomId];
+        return next;
+      });
+    }
     setDoorPlacingForRoom(null); // exit door-placement mode after a placement
+  }, []);
+
+  const setWidth = useCallback((roomId: string, width: number | null) => {
+    setDraftWidths((prev) => {
+      if (width == null || !Number.isFinite(width)) {
+        if (prev[roomId] == null) return prev;
+        const next = { ...prev };
+        delete next[roomId];
+        return next;
+      }
+      return { ...prev, [roomId]: width };
+    });
   }, []);
 
   const startDoorPlacing = useCallback((roomId: string) => {
@@ -217,10 +262,15 @@ export default function RoomRelationsProvider({
       (rid) => !draftOpenTo.includes(rid),
     );
 
-    // Build open_to entries — plain string when no door, object when door is set.
+    // Build open_to entries — plain string when no door/width override,
+    // object form when either is set. Width is only meaningful alongside a
+    // door (it sizes the swing arc placed there), so we only include it
+    // when door is also present.
     const openToEntries = draftOpenTo.map((rid) => {
       const door = draftDoors[rid];
-      return door ? { id: rid, door } : rid;
+      const width = draftWidths[rid];
+      if (!door) return rid;
+      return width != null ? { id: rid, door, width } : { id: rid, door };
     });
 
     try {
@@ -248,7 +298,7 @@ export default function RoomRelationsProvider({
     } finally {
       setSaving(false);
     }
-  }, [editingFloorId, editingRoomId, draftOpenTo, draftDoors, draftFloorArea, initialReverseRefs, cancel, router]);
+  }, [editingFloorId, editingRoomId, draftOpenTo, draftDoors, draftWidths, draftFloorArea, initialReverseRefs, cancel, router]);
 
   // ESC: first exit door-placement mode; second press cancels editing.
   useEffect(() => {
@@ -273,6 +323,7 @@ export default function RoomRelationsProvider({
         editingRoomName,
         draftOpenTo,
         draftDoors,
+        draftWidths,
         draftFloorArea,
         doorPlacingForRoom,
         saving,
@@ -281,6 +332,7 @@ export default function RoomRelationsProvider({
         toggleOpenTo,
         setFloorArea,
         setDoor,
+        setWidth,
         startDoorPlacing,
         stopDoorPlacing,
         save,

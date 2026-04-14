@@ -17,7 +17,12 @@ const ARROW_STROKE = 0.05;
 const MARKER_ID = "room-conn-arrow";
 
 // Door swing arc geometry (metres).
-const DOOR_WIDTH   = 0.8;   // door leaf width (radius of swing arc) — ~32" / 0.81 m interior standard
+/**
+ * Default door width — standard interior door (~32" / 0.81 m). Used when
+ * a connection doesn't specify its own `width` override. Wider openings
+ * (sliding glass, archways) set a per-edge width via `open_to[].width`.
+ */
+const DEFAULT_DOOR_WIDTH = 0.8;
 const DOOR_STROKE_W = 0.04; // stroke width for door leaf and arc
 
 /**
@@ -487,6 +492,7 @@ export default function RoomOverlay({ floor, transform }: Props) {
 
             if (door && selectedEntry.room.points) {
               const [doorX, doorY] = door;
+              const doorWidth = relations.draftWidths[connId] ?? DEFAULT_DOOR_WIDTH;
               const connCentroid = connEntry.room.points
                 ? polygonCentroid(connEntry.room.points)
                 : null;
@@ -503,14 +509,14 @@ export default function RoomOverlay({ floor, transform }: Props) {
                 const stx = transform.flipX ? -edgeInfo.tanX : edgeInfo.tanX;
                 const sty = transform.flipY ? -edgeInfo.tanY : edgeInfo.tanY;
 
-                const halfW = DOOR_WIDTH / 2;
+                const halfW = doorWidth / 2;
                 const hingeX = sx - stx * halfW;
                 const hingeY = sy - sty * halfW;
                 const freeEndX = sx + stx * halfW;
                 const freeEndY = sy + sty * halfW;
-                // Open tip: hinge offset outward (into connected room) by DOOR_WIDTH
-                const openTipX = hingeX + snx * DOOR_WIDTH;
-                const openTipY = hingeY + sny * DOOR_WIDTH;
+                // Open tip: hinge offset outward (into connected room) by full width.
+                const openTipX = hingeX + snx * doorWidth;
+                const openTipY = hingeY + sny * doorWidth;
 
                 // Sweep: cross product of (freeEnd−hinge) × (openTip−hinge) in SVG space.
                 // Positive → clockwise in screen coords → sweep=1.
@@ -529,12 +535,12 @@ export default function RoomOverlay({ floor, transform }: Props) {
                     />
                     {/* Door swing arc (dashed quarter-circle) */}
                     <path
-                      d={`M ${f(freeEndX)} ${f(freeEndY)} A ${DOOR_WIDTH} ${DOOR_WIDTH} 0 0 ${sweep} ${f(openTipX)} ${f(openTipY)}`}
+                      d={`M ${f(freeEndX)} ${f(freeEndY)} A ${doorWidth} ${doorWidth} 0 0 ${sweep} ${f(openTipX)} ${f(openTipY)}`}
                       fill="none"
                       stroke={ARROW_COLOR}
                       strokeWidth={DOOR_STROKE_W * 0.65}
                       strokeLinecap="round"
-                      strokeDasharray={`${(DOOR_WIDTH * 0.14).toFixed(3)} ${(DOOR_WIDTH * 0.09).toFixed(3)}`}
+                      strokeDasharray={`${(doorWidth * 0.14).toFixed(3)} ${(doorWidth * 0.09).toFixed(3)}`}
                     />
                   </g>
                 );

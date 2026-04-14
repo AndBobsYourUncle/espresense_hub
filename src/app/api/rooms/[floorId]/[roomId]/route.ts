@@ -38,7 +38,7 @@ export async function PATCH(
 
   if (!Array.isArray(body.open_to) || !body.open_to.every(isValidOpenToEntry)) {
     return NextResponse.json(
-      { error: "`open_to` must be an array of strings or {id, door?} objects" },
+      { error: "`open_to` must be an array of strings or {id, door?, width?} objects" },
       { status: 400 },
     );
   }
@@ -64,7 +64,7 @@ export async function PATCH(
     await updateRoomRelations(
       floorId,
       roomId,
-      body.open_to as Array<string | { id: string; door?: [number, number] }>,
+      body.open_to as Array<string | { id: string; door?: [number, number]; width?: number }>,
       body.floor_area as string | null | undefined,
       removeFromRooms,
     );

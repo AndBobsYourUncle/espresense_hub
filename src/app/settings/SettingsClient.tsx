@@ -1244,7 +1244,7 @@ function NodesTab({ doc, setField, addToList, deleteAt }: DocListProps) {
   );
 }
 
-type OpenToEntry = string | { id: string; door?: [number, number] };
+type OpenToEntry = string | { id: string; door?: [number, number]; width?: number };
 
 interface RoomData {
   id?: string;
@@ -1303,7 +1303,7 @@ function RoomsTab({ doc, setField, addToList, deleteAt }: DocListProps) {
                 const openToIds = rawOpenTo.map(openToEntryId);
                 const objsByid = new Map(
                   rawOpenTo
-                    .filter((e): e is { id: string; door?: [number, number] } => typeof e === "object" && e !== null)
+                    .filter((e): e is { id: string; door?: [number, number]; width?: number } => typeof e === "object" && e !== null)
                     .map((e) => [e.id, e]),
                 );
                 return (
@@ -1366,6 +1366,7 @@ function RoomsTab({ doc, setField, addToList, deleteAt }: DocListProps) {
                         <div className="mt-2 space-y-1">
                           {[...objsByid.values()].map((e) => {
                             const [dx, dy] = e.door ?? [0, 0];
+                            const width = e.width;
                             const updateDoor = (newX: number | undefined, newY: number | undefined) => {
                               const x = newX ?? dx;
                               const y = newY ?? dy;
@@ -1375,6 +1376,20 @@ function RoomsTab({ doc, setField, addToList, deleteAt }: DocListProps) {
                                 if (typeof entry === "string") return entry;
                                 if (entry.id !== e.id) return entry;
                                 return { ...entry, door: [x, y] as [number, number] };
+                              });
+                              setField(["floors", fi, "rooms", ri, "open_to"], next);
+                            };
+                            const updateWidth = (newWidth: number | null) => {
+                              const next = rawOpenTo.map((entry) => {
+                                if (typeof entry === "string") return entry;
+                                if (entry.id !== e.id) return entry;
+                                if (newWidth == null) {
+                                  // Drop the width field entirely (revert to default).
+                                  const { width: _drop, ...rest } = entry;
+                                  void _drop;
+                                  return rest;
+                                }
+                                return { ...entry, width: newWidth };
                               });
                               setField(["floors", fi, "rooms", ri, "open_to"], next);
                             };
@@ -1423,6 +1438,24 @@ function RoomsTab({ doc, setField, addToList, deleteAt }: DocListProps) {
                                   >
                                     <Trash2 className="h-3 w-3" />
                                   </button>
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  <span className="text-[10px] text-zinc-400 w-10 shrink-0">width</span>
+                                  <input
+                                    type="number"
+                                    step={0.05}
+                                    min={0.1}
+                                    value={width ?? ""}
+                                    placeholder="0.8 (default)"
+                                    onChange={(ev) => {
+                                      const raw = ev.target.value;
+                                      if (raw === "") return updateWidth(null);
+                                      const v = Number(raw);
+                                      if (Number.isFinite(v) && v > 0) updateWidth(v);
+                                    }}
+                                    className="flex-1 min-w-0 h-7 px-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                  />
+                                  <span className="text-[10px] text-zinc-400">m</span>
                                 </div>
                               </div>
                             );

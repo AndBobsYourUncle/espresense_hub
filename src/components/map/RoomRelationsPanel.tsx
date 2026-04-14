@@ -68,6 +68,7 @@ export default function RoomRelationsPanel({ floor }: Props) {
     editingRoomName,
     draftOpenTo,
     draftDoors,
+    draftWidths,
     draftFloorArea,
     doorPlacingForRoom,
     saving,
@@ -75,6 +76,7 @@ export default function RoomRelationsPanel({ floor }: Props) {
     toggleOpenTo,
     setFloorArea,
     setDoor,
+    setWidth,
     startDoorPlacing,
     stopDoorPlacing,
     save,
@@ -312,6 +314,34 @@ export default function RoomRelationsPanel({ floor }: Props) {
                             }}
                             className="w-full h-7 px-2 text-xs font-mono bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md text-zinc-900 dark:text-zinc-100 text-right tabular-nums"
                           />
+                        </div>
+                        {/* Door/opening width — override the default 0.8 m (standard
+                            interior door) for wider openings like sliding glass. */}
+                        <div className="col-span-2">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <div className="text-[10px] text-zinc-400">Opening width</div>
+                            {draftWidths[rid] != null && (
+                              <button
+                                type="button"
+                                onClick={() => setWidth(rid, null)}
+                                className="text-[10px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+                                title="Reset to default (0.8 m)"
+                              >
+                                reset
+                              </button>
+                            )}
+                          </div>
+                          <DistanceInput
+                            valueMeters={draftWidths[rid] ?? 0.8}
+                            onChangeMeters={(d) => {
+                              if (!Number.isFinite(d) || d <= 0) return;
+                              setWidth(rid, d);
+                            }}
+                            className="w-full h-7 px-2 text-xs font-mono bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md text-zinc-900 dark:text-zinc-100 text-right tabular-nums"
+                          />
+                          <div className="mt-0.5 text-[10px] text-zinc-400">
+                            Default 0.8 m standard door; sliding glass ≈ 1.8–2.4 m
+                          </div>
                         </div>
                         <div className="col-span-2 text-[10px] text-zinc-400 text-right">
                           Wall: {formatDistanceDisplay(doorEdge.wallLength, units)} total

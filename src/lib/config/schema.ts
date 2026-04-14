@@ -157,14 +157,23 @@ const Point3DSchema = z.tuple([z.number(), z.number(), z.number()]);
 
 /**
  * A single entry in a room's `open_to` list. Either a plain id/name string
- * (back-compat) or an object that also carries an optional doorway position.
+ * (back-compat) or an object that also carries an optional doorway position
+ * and optional width override.
  */
 export const OpenToEntrySchema = z.union([
   z.string(),
   z.object({
     id: z.string(),
-    /** Doorway centre in config-space metres, for the Bayesian room tracker. */
+    /** Doorway centre in config-space metres. */
     door: z.tuple([z.number(), z.number()]).optional(),
+    /**
+     * Door/opening width in metres. Defaults to ~0.8 m (standard interior
+     * door) when omitted — override for wider openings like sliding glass
+     * doors (typically 1.8–2.4 m) or archways. Affects both the rendered
+     * swing-arc size on the map and the Phase 3 Bayesian transition prior
+     * (wider openings carry higher transition probability).
+     */
+    width: z.number().positive().optional(),
   }),
 ]);
 
@@ -178,6 +187,11 @@ export function openToId(entry: OpenToEntry): string {
 /** Extract the door position from an open_to entry, or undefined. */
 export function openToDoor(entry: OpenToEntry): [number, number] | undefined {
   return typeof entry === "string" ? undefined : entry.door;
+}
+
+/** Extract the door width override from an open_to entry, or undefined. */
+export function openToWidth(entry: OpenToEntry): number | undefined {
+  return typeof entry === "string" ? undefined : entry.width;
 }
 
 export const RoomSchema = z

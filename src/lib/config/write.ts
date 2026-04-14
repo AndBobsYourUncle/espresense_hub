@@ -23,16 +23,19 @@ function roundCoord(n: number): number {
  */
 function buildOpenToNode(
   doc: Document,
-  openTo: Array<string | { id: string; door?: [number, number] }>,
+  openTo: Array<string | { id: string; door?: [number, number]; width?: number }>,
 ): unknown {
   const node = doc.createNode(
     openTo.map((entry) => {
       if (typeof entry === "string") return entry;
-      if (!entry.door) return { id: entry.id };
-      return {
-        id: entry.id,
-        door: [roundCoord(entry.door[0]), roundCoord(entry.door[1])],
-      };
+      const obj: Record<string, unknown> = { id: entry.id };
+      if (entry.door) {
+        obj.door = [roundCoord(entry.door[0]), roundCoord(entry.door[1])];
+      }
+      if (entry.width != null && Number.isFinite(entry.width)) {
+        obj.width = roundCoord(entry.width);
+      }
+      return obj;
     }),
   );
   // Walk the resulting sequence and flip the door child arrays to flow style.
@@ -308,7 +311,7 @@ export async function readRawConfig(): Promise<{
 export async function updateRoomRelations(
   floorId: string,
   roomId: string,
-  openTo: Array<string | { id: string; door?: [number, number] }>,
+  openTo: Array<string | { id: string; door?: [number, number]; width?: number }>,
   floorArea: string | null | undefined,
   removeFromRooms: string[] = [],
 ): Promise<void> {
@@ -422,7 +425,7 @@ export async function updateRoomRelations(
       if (!Array.isArray(otherOpenTo)) continue;
       // Filter out any entry whose id resolves to the editing roomId.
       // Entries may be strings or {id, door?} objects (mixed is fine).
-      const filtered = (otherOpenTo as Array<string | { id: string; door?: [number, number] }>).filter(
+      const filtered = (otherOpenTo as Array<string | { id: string; door?: [number, number]; width?: number }>).filter(
         (entry) => openToId(entry) !== roomId,
       );
       doc.setIn(
