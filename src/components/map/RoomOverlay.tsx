@@ -493,6 +493,13 @@ export default function RoomOverlay({ floor, transform }: Props) {
             if (door && selectedEntry.room.points) {
               const [doorX, doorY] = door;
               const doorWidth = relations.draftWidths[connId] ?? DEFAULT_DOOR_WIDTH;
+              // Swing arc stays door-scale even for wide openings. A 2.4 m
+              // sliding door shouldn't render with a 2.4 m-radius arc — the
+              // arc is a conventional "door symbol," not to-scale geometry.
+              // The leaf line still spans the full `doorWidth` so the opening
+              // size is visible; the arc sits at one end of the leaf, radius
+              // capped at DEFAULT_DOOR_WIDTH.
+              const arcRadius = Math.min(doorWidth, DEFAULT_DOOR_WIDTH);
               const connCentroid = connEntry.room.points
                 ? polygonCentroid(connEntry.room.points)
                 : null;
@@ -514,18 +521,25 @@ export default function RoomOverlay({ floor, transform }: Props) {
                 const hingeY = sy - sty * halfW;
                 const freeEndX = sx + stx * halfW;
                 const freeEndY = sy + sty * halfW;
-                // Open tip: hinge offset outward (into connected room) by full width.
-                const openTipX = hingeX + snx * doorWidth;
-                const openTipY = hingeY + sny * doorWidth;
+                // Arc start: along the leaf at distance `arcRadius` from the
+                // hinge (same as freeEnd when the door is standard-width,
+                // partway along the leaf for wider openings).
+                const arcStartX = hingeX + stx * arcRadius;
+                const arcStartY = hingeY + sty * arcRadius;
+                // Open tip: hinge offset outward into the connected room by
+                // arcRadius. Matches the arc radius so the quarter-circle
+                // closes cleanly.
+                const openTipX = hingeX + snx * arcRadius;
+                const openTipY = hingeY + sny * arcRadius;
 
-                // Sweep: cross product of (freeEnd−hinge) × (openTip−hinge) in SVG space.
+                // Sweep: cross product of (arcStart−hinge) × (openTip−hinge) in SVG space.
                 // Positive → clockwise in screen coords → sweep=1.
                 const sweep = (sty * snx - stx * sny) >= 0 ? 0 : 1;
 
                 const f = (v: number) => v.toFixed(4);
                 return (
                   <g key={`conn-${connId}`} style={{ pointerEvents: "none" }}>
-                    {/* Door leaf line */}
+                    {/* Door leaf line — spans the full opening width */}
                     <line
                       x1={hingeX} y1={hingeY}
                       x2={freeEndX} y2={freeEndY}
@@ -533,14 +547,14 @@ export default function RoomOverlay({ floor, transform }: Props) {
                       strokeWidth={DOOR_STROKE_W}
                       strokeLinecap="round"
                     />
-                    {/* Door swing arc (dashed quarter-circle) */}
+                    {/* Door swing arc — door-scale radius regardless of opening width */}
                     <path
-                      d={`M ${f(freeEndX)} ${f(freeEndY)} A ${doorWidth} ${doorWidth} 0 0 ${sweep} ${f(openTipX)} ${f(openTipY)}`}
+                      d={`M ${f(arcStartX)} ${f(arcStartY)} A ${arcRadius} ${arcRadius} 0 0 ${sweep} ${f(openTipX)} ${f(openTipY)}`}
                       fill="none"
                       stroke={ARROW_COLOR}
                       strokeWidth={DOOR_STROKE_W * 0.65}
                       strokeLinecap="round"
-                      strokeDasharray={`${(doorWidth * 0.14).toFixed(3)} ${(doorWidth * 0.09).toFixed(3)}`}
+                      strokeDasharray={`${(arcRadius * 0.14).toFixed(3)} ${(arcRadius * 0.09).toFixed(3)}`}
                     />
                   </g>
                 );
