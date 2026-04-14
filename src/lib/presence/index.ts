@@ -268,15 +268,8 @@ function attributesTopic(deviceId: string): string {
   return `espresense/hub/${deviceId}/attributes`;
 }
 
-function discoveryTopic(
-  discoveryPrefix: string,
-  deviceId: string,
-  zoneId?: string,
-): string {
-  const entityId = zoneId
-    ? `espresense-hub-${deviceId}-${zoneId}`
-    : `espresense-hub-${deviceId}`;
-  return `${discoveryPrefix}/device_tracker/${entityId}/config`;
+function discoveryTopic(discoveryPrefix: string, deviceId: string): string {
+  return `${discoveryPrefix}/device_tracker/espresense-hub-${deviceId}/config`;
 }
 
 /**
@@ -362,11 +355,13 @@ async function ensureDiscovery(
 /**
  * Publish HA discovery for a zone as a `binary_sensor` entity with
  * `device_class: occupancy`. State topic stays at the same path zones
- * have always used, but the payloads are now `"on"` / `"off"`.
+ * have always used, but the payloads are `"on"` / `"off"`.
  *
- * Also retires the legacy `device_tracker`-based zone entity (published
- * by earlier versions) by sending an empty retained payload to its old
- * discovery topic — HA removes the orphan entity on receipt.
+ * Historical note: earlier versions published zones as `device_tracker`
+ * entities. The migration-to-binary_sensor release included a one-shot
+ * empty-retained publish to the old discovery topics to delete the
+ * orphans. That cleanup was removed after the first successful deploy
+ * — those retained topics are already empty on the broker.
  */
 async function ensureZoneDiscovery(
   deviceId: string,
@@ -379,16 +374,6 @@ async function ensureZoneDiscovery(
   const s = state();
   if (s.sentDiscovery.has(key)) return;
 
-  // Step 1: retire the legacy device_tracker zone entity if we published
-  // one in a previous release. Empty retained payload = "entity removed"
-  // for HA's MQTT integration.
-  await publishRaw(
-    discoveryTopic(discoveryPrefix, deviceId, zoneId),
-    "",
-    { retain: true, qos: 1 },
-  );
-
-  // Step 2: publish the new binary_sensor discovery.
   const payload = {
     name: zoneLabel ?? zoneId,
     unique_id: `espresense-hub-${deviceId}-${zoneId}`,
