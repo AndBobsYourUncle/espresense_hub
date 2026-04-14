@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import type { Floor } from "@/lib/config";
+import { OUTSIDE_ROOM_ID } from "@/lib/config/schema";
 import { polygonCentroid, tx, ty, txInv, tyInv, type FloorTransform } from "@/lib/map/geometry";
 import { useMapTool } from "./MapToolProvider";
 import { usePresenceZones, ZONE_COLORS } from "./PresenceZonesProvider";
@@ -486,8 +487,14 @@ export default function RoomOverlay({ floor, transform }: Props) {
         {isRelationsMode &&
           selectedEntry &&
           relations.draftOpenTo.map((connId) => {
-            const connEntry = roomPolygons.find((e) => e?.room.id === connId);
-            if (!connEntry) return null;
+            const isOutsideEdge = connId === OUTSIDE_ROOM_ID;
+            const connEntry = isOutsideEdge
+              ? null
+              : roomPolygons.find((e) => e?.room.id === connId) ?? null;
+            // Real-room connections require a matching polygon; outside is
+            // virtual — we skip the centroid-to-centroid arrow fallback but
+            // can still render a door/swing arc.
+            if (!isOutsideEdge && !connEntry) return null;
             const door = relations.draftDoors[connId];
 
             if (door && selectedEntry.room.points) {
@@ -500,12 +507,30 @@ export default function RoomOverlay({ floor, transform }: Props) {
               // visually "lives on" the free-tip side rather than bisecting
               // the middle of a wide leaf.
               const arcRadius = Math.min(doorWidth, DEFAULT_DOOR_WIDTH);
-              const connCentroid = connEntry.room.points
-                ? polygonCentroid(connEntry.room.points)
-                : null;
-              const edgeInfo = connCentroid
-                ? wallEdgeInfoAt(doorX, doorY, selectedEntry.room.points, connCentroid[0], connCentroid[1])
-                : null;
+              // "Facing" point — used by wallEdgeInfoAt to orient the wall
+              // normal outward through the door. For a real connected room,
+              // use its centroid. For outside, there's no polygon to
+              // reference, so reflect the editing room's centroid across
+              // the door to get a point in the "outward" direction.
+              let facingX: number | null = null;
+              let facingY: number | null = null;
+              if (isOutsideEdge) {
+                const ec = polygonCentroid(selectedEntry.room.points);
+                if (ec) {
+                  facingX = 2 * doorX - ec[0];
+                  facingY = 2 * doorY - ec[1];
+                }
+              } else if (connEntry?.room.points) {
+                const cc = polygonCentroid(connEntry.room.points);
+                if (cc) {
+                  facingX = cc[0];
+                  facingY = cc[1];
+                }
+              }
+              const edgeInfo =
+                facingX != null && facingY != null
+                  ? wallEdgeInfoAt(doorX, doorY, selectedEntry.room.points, facingX, facingY)
+                  : null;
 
               if (edgeInfo) {
                 const sx = tx(transform, doorX);
@@ -565,7 +590,11 @@ export default function RoomOverlay({ floor, transform }: Props) {
               }
             }
 
-            // Fallback: centroid-to-centroid arrow
+            // Fallback: centroid-to-centroid arrow for room-to-room
+            // connections without a door placement. Outside has no
+            // centroid to anchor to — the user needs to place the door on
+            // a wall first, so just render nothing until they do.
+            if (isOutsideEdge || !connEntry) return null;
             return (
               <line
                 key={`conn-${connId}`}

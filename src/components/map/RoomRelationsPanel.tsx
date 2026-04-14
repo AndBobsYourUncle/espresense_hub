@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
-import { Crosshair, Network, Save, X } from "lucide-react";
+import { Crosshair, DoorOpen, Network, Save, X } from "lucide-react";
 import { useDraggable } from "@/lib/hooks/useDraggable";
 import type { Floor } from "@/lib/config";
+import { OUTSIDE_ROOM_ID } from "@/lib/config/schema";
 import { formatDistanceDisplay } from "@/lib/units";
 import DistanceInput from "@/components/DistanceInput";
 import { useUnits } from "@/components/UnitsProvider";
@@ -100,7 +101,20 @@ export default function RoomRelationsPanel({ floor }: Props) {
   if (activeTool !== "room-relations" || !editingRoomId) return null;
 
   const editingRoom = floor.rooms.find((r) => r.id === editingRoomId) ?? null;
-  const otherRooms = floor.rooms.filter((r) => r.id && r.id !== editingRoomId);
+  // "Outside" is modeled as a virtual connection target — not a real room
+  // on the floor, but selectable in the same checklist so users can
+  // declare exterior doors without hand-editing YAML. Synthesized ahead
+  // of the real rooms list.
+  const connectionTargets: Array<{
+    id: string;
+    label: string;
+    isOutside: boolean;
+  }> = [
+    { id: OUTSIDE_ROOM_ID, label: "Outside", isOutside: true },
+    ...floor.rooms
+      .filter((r) => r.id && r.id !== editingRoomId)
+      .map((r) => ({ id: r.id as string, label: r.name ?? (r.id as string), isOutside: false })),
+  ];
 
   return (
     <div
@@ -211,16 +225,17 @@ export default function RoomRelationsPanel({ floor }: Props) {
               </div>
             )}
 
-            {otherRooms.length === 0 ? (
-              <div className="px-4 py-2 text-xs text-zinc-400">
-                No other rooms on this floor.
-              </div>
-            ) : (
-              otherRooms.map((room) => {
-                const rid = room.id!;
+            {connectionTargets.map((target) => {
+                const rid = target.id;
                 const checked = draftOpenTo.includes(rid);
                 const hasDoor = Boolean(draftDoors[rid]);
                 const isPlacing = doorPlacingForRoom === rid;
+
+                // floor_area "same group" indicator is only meaningful for
+                // real rooms — outside has no floor_area concept.
+                const peerRoom = target.isOutside
+                  ? null
+                  : floor.rooms.find((r) => r.id === rid);
 
                 const doorEdge =
                   checked && hasDoor && editingRoom?.points
@@ -232,7 +247,7 @@ export default function RoomRelationsPanel({ floor }: Props) {
                     key={rid}
                     className="border-t border-zinc-100 dark:border-zinc-800/60 first:border-t-0"
                   >
-                    {/* Main room row */}
+                    {/* Main connection row */}
                     <div className="flex items-center gap-2 px-4 py-2">
                       <label className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
                         <input
@@ -241,12 +256,24 @@ export default function RoomRelationsPanel({ floor }: Props) {
                           onChange={() => toggleOpenTo(rid)}
                           className="h-3.5 w-3.5 rounded border-zinc-300 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 shrink-0"
                         />
-                        <span className="text-sm text-zinc-900 dark:text-zinc-100 truncate">
-                          {room.name ?? rid}
+                        {target.isOutside && (
+                          <DoorOpen
+                            className="h-3.5 w-3.5 text-emerald-500 shrink-0"
+                            aria-hidden="true"
+                          />
+                        )}
+                        <span
+                          className={`text-sm truncate ${
+                            target.isOutside
+                              ? "text-emerald-700 dark:text-emerald-400 font-medium"
+                              : "text-zinc-900 dark:text-zinc-100"
+                          }`}
+                        >
+                          {target.label}
                         </span>
                       </label>
-                      {/* Show same-group badge */}
-                      {room.floor_area && room.floor_area === draftFloorArea && !checked && (
+                      {/* Show same-group badge — only for real rooms */}
+                      {peerRoom?.floor_area && peerRoom.floor_area === draftFloorArea && !checked && (
                         <span className="text-xs text-zinc-400 font-mono shrink-0">
                           same group
                         </span>
@@ -350,8 +377,7 @@ export default function RoomRelationsPanel({ floor }: Props) {
                     )}
                   </div>
                 );
-              })
-            )}
+              })}
           </div>
 
           {/* Footer */}
