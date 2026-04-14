@@ -849,16 +849,74 @@ function FilteringTab({ doc, setField }: DocProps) {
 
       <Section
         title="Bayesian room tracker"
-        description="Graph-aware probabilistic tracker — smooths room assignment using the open_to / floor_area adjacency graph. Visible on the map as an extra dot in the alternatives view. Service restart required to toggle."
+        description="Graph-aware probabilistic tracker. Smooths room assignment using the open_to / floor_area adjacency graph and door positions, and publishes a parallel device_tracker.{id}_location_smart entity to Home Assistant alongside the raw tracker. Visible on the map's compare view as an indigo dot. Toggle requires restart; all tuning knobs are live-reloadable."
       >
         <Field
           label="Enabled"
-          hint="When on, computes a per-device posterior over rooms each message and emits a room-constrained position. Wider doors and door proximity influence transition priors. Turning off skips the compute — fine if you don't need the diagnostic view."
+          hint="Master switch. When off, the locator is skipped entirely — no extra dot, no smart HA entity. Service restart required to change."
         >
           <Toggle
             value={get<boolean>(doc, ["bayesian", "enabled"], true)}
             onChange={(v) => setField(["bayesian", "enabled"], v)}
             label={get<boolean>(doc, ["bayesian", "enabled"], true) ? "On" : "Off"}
+          />
+        </Field>
+        <Field
+          label="Stay weight"
+          hint="Unnormalized weight for 'stays put' per tick. Higher = slower, more stable transitions. Default 1.6 gives ~0.87 stay-prob mid-room."
+        >
+          <NumberInput
+            value={get<number>(doc, ["bayesian", "stay_weight"], 1.6)}
+            onChange={(v) => setField(["bayesian", "stay_weight"], v)}
+            step={0.1}
+            min={0.1}
+          />
+        </Field>
+        <Field
+          label="Teleport weight"
+          hint="Unnormalized weight for non-adjacent transitions. Keeps a badly-committed state recoverable. Set to 0 to strictly forbid 'teleporting' — recovery then requires walking through adjacent rooms. Default 0.001."
+        >
+          <NumberInput
+            value={get<number>(doc, ["bayesian", "teleport_weight"], 0.001)}
+            onChange={(v) => setField(["bayesian", "teleport_weight"], v)}
+            step={0.001}
+            min={0}
+          />
+        </Field>
+        <Field
+          label="Proximity σ"
+          hint="Characteristic distance (metres) for door-proximity decay. Transition weight through a door scales as exp(−dist/σ). Larger = transitions easier from further away. Default 1.5 m."
+        >
+          <NumberInput
+            value={get<number>(doc, ["bayesian", "proximity_sigma_m"], 1.5)}
+            onChange={(v) => setField(["bayesian", "proximity_sigma_m"], v)}
+            step={0.1}
+            min={0.1}
+            unit="m"
+          />
+        </Field>
+        <Field
+          label="Proximity floor"
+          hint="Minimum proximity factor (away from any door). Prevents transitions from zeroing out mid-room. Default 0.05."
+        >
+          <NumberInput
+            value={get<number>(doc, ["bayesian", "proximity_floor"], 0.05)}
+            onChange={(v) => setField(["bayesian", "proximity_floor"], v)}
+            step={0.01}
+            min={0}
+            max={1}
+          />
+        </Field>
+        <Field
+          label="Default door width"
+          hint="Baseline width (metres) used when an open_to edge doesn't set its own `width`. Wider = higher transition weight. Default 0.8 m (standard interior door)."
+        >
+          <NumberInput
+            value={get<number>(doc, ["bayesian", "default_door_width_m"], 0.8)}
+            onChange={(v) => setField(["bayesian", "default_door_width_m"], v)}
+            step={0.1}
+            min={0.1}
+            unit="m"
           />
         </Field>
       </Section>

@@ -51,6 +51,18 @@ interface DeviceFileV1 {
           sum: number;
           sumSq: number;
           lastUpdatedMs: number;
+          /**
+           * v1.3: how many samples had a different room assignment than
+           * the active locator. Optional for back-compat — older files
+           * load with 0 and accumulate from there.
+           */
+          roomDisagreeCount?: number;
+          /**
+           * v1.4: strict subset of roomDisagreeCount — samples where
+           * one locator placed the device inside a room polygon and the
+           * other placed it outside all polygons.
+           */
+          insideOutsideDisagreeCount?: number;
         }
       >;
     }
@@ -172,6 +184,8 @@ export async function loadDevicePins(store: Store): Promise<void> {
             count: s.count,
             sum: s.sum,
             sumSq: s.sumSq,
+            roomDisagreeCount: s.roomDisagreeCount ?? 0,
+            insideOutsideDisagreeCount: s.insideOutsideDisagreeCount ?? 0,
             lastUpdatedMs: s.lastUpdatedMs ?? 0,
           });
         }
@@ -239,6 +253,8 @@ export async function saveDevicePins(store: Store): Promise<void> {
         count: number;
         sum: number;
         sumSq: number;
+        roomDisagreeCount: number;
+        insideOutsideDisagreeCount: number;
         lastUpdatedMs: number;
       }> = {};
       for (const [algo, s] of dev.locatorComparisons) {
@@ -246,6 +262,8 @@ export async function saveDevicePins(store: Store): Promise<void> {
           count: s.count,
           sum: s.sum,
           sumSq: s.sumSq,
+          roomDisagreeCount: s.roomDisagreeCount,
+          insideOutsideDisagreeCount: s.insideOutsideDisagreeCount,
           lastUpdatedMs: s.lastUpdatedMs,
         };
       }

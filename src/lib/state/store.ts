@@ -100,6 +100,22 @@ export interface LocatorComparisonStats {
   sum: number;
   /** Σ |active - alt|² for stddev computation. */
   sumSq: number;
+  /**
+   * Number of samples where this locator's position landed in a
+   * different room than the active locator's position. Includes the
+   * "one inside a room, other between rooms (null)" case — anything
+   * where the two disagree on room identity.
+   */
+  roomDisagreeCount: number;
+  /**
+   * Strict subset of `roomDisagreeCount`: samples where one locator
+   * placed the device *inside* a room polygon and the other placed it
+   * *outside* all polygons (or vice versa). This is the specifically
+   * presence-automation-breaking case — a device "drifting outside"
+   * for a tick flips away automations. Useful for measuring how much
+   * the Bayesian layer is preventing false "not_home" flips.
+   */
+  insideOutsideDisagreeCount: number;
   /** Most recent update, ms epoch. */
   lastUpdatedMs: number;
 }
@@ -522,10 +538,16 @@ export class Store {
     if (d.position) {
       const dx = pos.x - d.position.x;
       const dy = pos.y - d.position.y;
+      // Room-disagreement flag is false here — computing it would require
+      // config/room access, which this data layer shouldn't reach into.
+      // Upstream-vs-ours room comparison is less interesting than locator
+      // internals anyway; distance alone is enough for the compare view.
       this.recordLocatorComparison(
         d,
         "upstream_companion",
         Math.sqrt(dx * dx + dy * dy),
+        false,
+        false,
       );
     }
   }
@@ -541,6 +563,8 @@ export class Store {
     device: DeviceState,
     algorithm: string,
     distance: number,
+    roomDisagrees: boolean,
+    insideOutsideDisagrees: boolean,
   ): void {
     if (!Number.isFinite(distance) || distance < 0) return;
     if (!device.locatorComparisons) {
@@ -548,7 +572,14 @@ export class Store {
     }
     let stats = device.locatorComparisons.get(algorithm);
     if (!stats) {
-      stats = { count: 0, sum: 0, sumSq: 0, lastUpdatedMs: 0 };
+      stats = {
+        count: 0,
+        sum: 0,
+        sumSq: 0,
+        roomDisagreeCount: 0,
+        insideOutsideDisagreeCount: 0,
+        lastUpdatedMs: 0,
+      };
       device.locatorComparisons.set(algorithm, stats);
     }
     const MAX = 10_000;
@@ -557,10 +588,14 @@ export class Store {
       stats.count = MAX - 1;
       stats.sum *= factor;
       stats.sumSq *= factor;
+      stats.roomDisagreeCount *= factor;
+      stats.insideOutsideDisagreeCount *= factor;
     }
     stats.count += 1;
     stats.sum += distance;
     stats.sumSq += distance * distance;
+    if (roomDisagrees) stats.roomDisagreeCount += 1;
+    if (insideOutsideDisagrees) stats.insideOutsideDisagreeCount += 1;
     stats.lastUpdatedMs = Date.now();
   }
 

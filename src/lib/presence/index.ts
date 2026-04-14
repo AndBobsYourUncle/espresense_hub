@@ -264,7 +264,7 @@ function stateTopic(deviceId: string, zoneId?: string): string {
 }
 
 function attributesTopic(deviceId: string): string {
-  // All trackers for a device share one attributes topic — they all represent
+  // Raw + zone trackers share one attributes topic — they all represent
   // the same physical position, just presented at different granularities.
   return `espresense/hub/${deviceId}/attributes`;
 }
@@ -278,6 +278,27 @@ function discoveryTopic(
     ? `espresense-hub-${deviceId}-${zoneId}`
     : `espresense-hub-${deviceId}`;
   return `${discoveryPrefix}/device_tracker/${entityId}/config`;
+}
+
+// ─── Smart (Bayesian) tracker topics ──────────────────────────────────────
+
+/**
+ * Topic slug segment for the Bayesian ("smart") tracker. Lives under the
+ * device's topic tree alongside zones, but with a leading underscore to
+ * reserve it from colliding with user-chosen zone ids.
+ */
+const SMART_SLUG = "_smart";
+
+function smartStateTopic(deviceId: string): string {
+  return `espresense/hub/${deviceId}/${SMART_SLUG}`;
+}
+
+function smartAttributesTopic(deviceId: string): string {
+  return `espresense/hub/${deviceId}/${SMART_SLUG}/attributes`;
+}
+
+function smartDiscoveryTopic(discoveryPrefix: string, deviceId: string): string {
+  return `${discoveryPrefix}/device_tracker/espresense-hub-${deviceId}-smart/config`;
 }
 
 // ─── Discovery ───────────────────────────────────────────────────────────────
@@ -327,6 +348,48 @@ async function ensureDiscovery(
   );
 }
 
+/**
+ * Register the Bayesian-smoothed "smart" tracker as a second HA
+ * device_tracker entity on the same underlying device. Runs alongside
+ * the raw location tracker so users can compare the two side-by-side
+ * in HA history and wire their own automations to whichever they trust.
+ *
+ * The smart entity has its own state + attribute topics under the
+ * device's `_smart` subpath, distinct from the raw topic and from zones.
+ */
+async function ensureSmartDiscovery(
+  deviceId: string,
+  deviceName: string,
+  discoveryPrefix: string,
+): Promise<void> {
+  const key = `${deviceId}::__smart__`;
+  const s = state();
+  if (s.sentDiscovery.has(key)) return;
+  s.sentDiscovery.add(key);
+
+  const payload = {
+    name: "Smart Location",
+    unique_id: `espresense-hub-${deviceId}-smart`,
+    state_topic: smartStateTopic(deviceId),
+    json_attributes_topic: smartAttributesTopic(deviceId),
+    status_topic: "espresense/hub/status",
+    source_type: "bluetooth",
+    device: {
+      name: deviceName,
+      manufacturer: "ESPresense",
+      model: "Hub",
+      identifiers: [`espresense-hub-${deviceId}`],
+    },
+    origin: { name: "ESPresense Hub" },
+  };
+
+  await publishRaw(
+    smartDiscoveryTopic(discoveryPrefix, deviceId),
+    JSON.stringify(payload),
+    { retain: true, qos: 1 },
+  );
+}
+
 // ─── Away publishing ──────────────────────────────────────────────────────────
 
 /**
@@ -360,6 +423,21 @@ export async function publishDeviceAway({
     });
   }
 
+  // Smart tracker — cleared whenever it was ever published. Gated by
+  // `bayesian.enabled` so we don't spam HA with discovery messages for a
+  // disabled feature.
+  if (config.bayesian.enabled) {
+    const smartKey = `${deviceId}::__smart__`;
+    if (s.lastState.get(smartKey) !== "not_home") {
+      s.lastState.set(smartKey, "not_home");
+      await ensureSmartDiscovery(deviceId, deviceName, discoveryPrefix);
+      await publishRaw(smartStateTopic(deviceId), "not_home", {
+        retain: false,
+        qos: 1,
+      });
+    }
+  }
+
   for (const zone of config.presence.zones) {
     const zKey = `${deviceId}::${zone.id}`;
     if (s.lastState.get(zKey) !== "not_home") {
@@ -381,10 +459,27 @@ export async function publishDeviceAway({
 
 // ─── Main publish entry point ─────────────────────────────────────────────────
 
+interface PositionSample {
+  x: number;
+  y: number;
+  z: number;
+  confidence: number;
+  fixes: number;
+  algorithm: string;
+}
+
 export interface PresencePublishInput {
   deviceId: string;
   deviceName: string;
-  position: { x: number; y: number; z: number; confidence: number; fixes: number; algorithm: string };
+  /** Raw active-locator position — drives the default `device_tracker.{id}_location` entity. */
+  position: PositionSample;
+  /**
+   * Bayesian-smoothed position from the BayesianLocator. When present
+   * AND `config.bayesian.enabled`, a parallel "smart" tracker is
+   * published to HA and zones aggregate over the Bayesian room
+   * assignment instead of the raw one.
+   */
+  bayesianPosition?: PositionSample;
   config: Config;
 }
 
@@ -405,13 +500,26 @@ export async function publishPresence({
   deviceId,
   deviceName,
   position,
+  bayesianPosition,
   config,
 }: PresencePublishInput): Promise<void> {
   const discoveryPrefix = config.mqtt.discovery_topic ?? "homeassistant";
-  const loc = resolveLocationWithHysteresis(deviceId, position, config);
+  const rawLoc = resolveLocationWithHysteresis(deviceId, position, config);
   const s = state();
 
-  // ── Attributes (always publish — position may have moved within a room) ──
+  // Smart tracker runs when the Bayesian locator is enabled and actually
+  // produced a position this tick. Skipping hysteresis on bayesianLoc —
+  // the Bayesian forward algorithm already provides heavy smoothing, and
+  // running the discrete room-hysteresis on top would just double-smooth.
+  const useBayesian = Boolean(bayesianPosition && config.bayesian.enabled);
+  const bayesianLoc =
+    useBayesian && bayesianPosition ? resolveLocation(bayesianPosition, config) : null;
+
+  // Zones auto-upgrade to the Bayesian room assignment when available —
+  // there's never a reason to aggregate over the known-noisier signal.
+  const zoneLoc = bayesianLoc ?? rawLoc;
+
+  // ── Raw attrs (always publish — position may have moved within a room) ──
   const attrs = {
     source_type: "espresense",
     x: position.x,
@@ -420,8 +528,8 @@ export async function publishPresence({
     confidence: Math.round(position.confidence * 100),
     fixes: position.fixes,
     algorithm: position.algorithm,
-    room: loc.roomName,
-    floor: loc.floorName,
+    room: rawLoc.roomName,
+    floor: rawLoc.floorName,
     last_seen: new Date().toISOString(),
   };
   await publishRaw(attributesTopic(deviceId), JSON.stringify(attrs), {
@@ -429,8 +537,8 @@ export async function publishPresence({
     qos: 1,
   });
 
-  // ── Default tracker (1:1 room → floor → not_home) ────────────────────────
-  const defState = defaultState(loc);
+  // ── Default tracker (raw): room id → floor id → "not_home" ───────────────
+  const defState = defaultState(rawLoc);
   const defKey = `${deviceId}::__default__`;
   if (s.lastState.get(defKey) !== defState) {
     s.lastState.set(defKey, defState);
@@ -442,9 +550,42 @@ export async function publishPresence({
     await ensureDiscovery(deviceId, deviceName, discoveryPrefix);
   }
 
+  // ── Smart tracker (Bayesian-smoothed): separate entity, separate attrs ───
+  if (useBayesian && bayesianLoc && bayesianPosition) {
+    const smartAttrs = {
+      source_type: "espresense",
+      x: bayesianPosition.x,
+      y: bayesianPosition.y,
+      z: bayesianPosition.z,
+      confidence: Math.round(bayesianPosition.confidence * 100),
+      fixes: bayesianPosition.fixes,
+      algorithm: bayesianPosition.algorithm,
+      room: bayesianLoc.roomName,
+      floor: bayesianLoc.floorName,
+      last_seen: new Date().toISOString(),
+    };
+    await publishRaw(
+      smartAttributesTopic(deviceId),
+      JSON.stringify(smartAttrs),
+      { retain: true, qos: 1 },
+    );
+    const smartState = defaultState(bayesianLoc);
+    const smartKey = `${deviceId}::__smart__`;
+    if (s.lastState.get(smartKey) !== smartState) {
+      s.lastState.set(smartKey, smartState);
+      await ensureSmartDiscovery(deviceId, deviceName, discoveryPrefix);
+      await publishRaw(smartStateTopic(deviceId), smartState, {
+        retain: false,
+        qos: 1,
+      });
+    } else {
+      await ensureSmartDiscovery(deviceId, deviceName, discoveryPrefix);
+    }
+  }
+
   // ── Zone trackers ─────────────────────────────────────────────────────────
   for (const zone of config.presence.zones) {
-    const zState = zoneState(loc, zone);
+    const zState = zoneState(zoneLoc, zone);
     const zKey = `${deviceId}::${zone.id}`;
     await ensureDiscovery(
       deviceId,

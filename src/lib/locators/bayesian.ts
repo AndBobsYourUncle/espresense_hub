@@ -5,27 +5,24 @@ import { getRoomGraph, type RoomGraph } from "@/lib/presence/room_graph";
 import { pointInPolygon } from "./room_aware";
 import type { Locator, LocatorResult, NodeFix } from "./types";
 
-/**
- * Default door width when `open_to[].width` isn't specified. Matches
- * the renderer's visual default and the "standard interior door ≈ 32 in"
- * convention.
- */
-const DEFAULT_DOOR_WIDTH = 0.8;
-
-/**
- * Transition-model tuning. Chosen to reproduce roughly the Phase 3b
- * stay-prob of ~0.85 when the device is in the middle of a room, while
- * giving wider / nearer doors proportionally more transition probability.
- */
-const STAY_WEIGHT = 1.6; // ≈ 2× default door width
-const TELEPORT_WEIGHT = 0.001; // small non-zero so stuck states can recover
-const PROX_SIGMA = 1.5; // m — characteristic distance for door-proximity falloff
-const PROX_FLOOR = 0.05; // minimum proximity factor (away from any door)
-
 /** Per-edge door/width data, looked up during transition-matrix build. */
 interface EdgeData {
   door?: readonly [number, number];
   width: number;
+}
+
+/**
+ * Transition-model tuning, mirrored from `config.bayesian.*` on each
+ * syncConfig call so the forward step can read them without hitting the
+ * config object repeatedly. All values are live-reloadable via the
+ * Settings UI.
+ */
+interface TuningParams {
+  stayWeight: number;
+  teleportWeight: number;
+  proximitySigmaM: number;
+  proximityFloor: number;
+  defaultDoorWidth: number;
 }
 
 /**
@@ -100,6 +97,15 @@ export class BayesianLocator implements Locator {
    */
   private edgeData: Map<string, EdgeData> = new Map();
 
+  /** Live tuning params (from `config.bayesian.*`). Refreshed on config change. */
+  private tuning: TuningParams = {
+    stayWeight: 1.6,
+    teleportWeight: 0.001,
+    proximitySigmaM: 1.5,
+    proximityFloor: 0.05,
+    defaultDoorWidth: 0.8,
+  };
+
   constructor(inner: Locator) {
     this.inner = inner;
   }
@@ -153,6 +159,16 @@ export class BayesianLocator implements Locator {
       this.neighborCount.set(s, this.graph.get(s)?.size ?? 0);
     }
 
+    // Live-reloaded tuning params — mirror them here so the hot per-solve
+    // path doesn't hit `config.bayesian.*` on every row build.
+    this.tuning = {
+      stayWeight: current.bayesian.stay_weight,
+      teleportWeight: current.bayesian.teleport_weight,
+      proximitySigmaM: current.bayesian.proximity_sigma_m,
+      proximityFloor: current.bayesian.proximity_floor,
+      defaultDoorWidth: current.bayesian.default_door_width_m,
+    };
+
     // Populate per-edge door/width data from every room's `open_to`. Edges
     // implied by `floor_area` (clique adjacency) are intentionally omitted
     // — they have no specific door location or width; `edgeWeight` uses
@@ -173,7 +189,7 @@ export class BayesianLocator implements Locator {
         if (!bId || bId === aId) continue;
         this.edgeData.set(edgeKey(aId, bId), {
           door: openToDoor(entry),
-          width: openToWidth(entry) ?? DEFAULT_DOOR_WIDTH,
+          width: openToWidth(entry) ?? this.tuning.defaultDoorWidth,
         });
       }
     }
@@ -234,20 +250,22 @@ export class BayesianLocator implements Locator {
    * conditioned on the current observation position. Weights are then
    * normalized so the row sums to 1.
    *
-   * Weight assignment before normalization:
+   * Weight assignment before normalization (all constants are
+   * live-reloadable via `config.bayesian.*`):
    *
-   *   - Stay (`from == to`): `STAY_WEIGHT` — roughly 2× a default door
+   *   - Stay (`from == to`): `stay_weight` — roughly 2× default door
    *     width, producing ~0.87 stay-prob when no doors are nearby.
    *   - Graph-adjacent with explicit door: `width × proximity(pos, door)`.
-   *     The proximity factor is `max(ε, exp(−dist/σ))`, so the transition
-   *     weight spikes when the device is near that specific door, while
-   *     other adjacent transitions decay to their floor weight.
+   *     The proximity factor is `max(proximity_floor, exp(−d/σ))` with
+   *     σ = `proximity_sigma_m`, so the transition weight spikes when
+   *     the device is near that specific door.
    *   - Graph-adjacent without door (floor_area cliques, or door-less
-   *     open_to strings): `DEFAULT_WIDTH × 1.0` — we have no location
+   *     open_to strings): `default_door_width_m × 1.0` — no location
    *     information so the edge is always available at baseline weight.
-   *   - Non-adjacent ("teleport"): `TELEPORT_WEIGHT` — tiny but non-zero
+   *   - Non-adjacent ("teleport"): `teleport_weight` — tiny but non-zero
    *     so a badly-committed state can eventually recover with enough
-   *     contrary evidence.
+   *     contrary evidence. Set to 0 to strictly forbid non-adjacent
+   *     transitions.
    */
   private buildTransitionRow(
     from: string,
@@ -255,14 +273,14 @@ export class BayesianLocator implements Locator {
     obsY: number,
   ): Map<string, number> {
     const row = new Map<string, number>();
-    row.set(from, STAY_WEIGHT);
+    row.set(from, this.tuning.stayWeight);
     const neighbors = this.graph.get(from) ?? new Set<string>();
     for (const to of this.states) {
       if (to === from) continue;
       if (neighbors.has(to)) {
         row.set(to, this.edgeWeight(from, to, obsX, obsY));
       } else {
-        row.set(to, TELEPORT_WEIGHT);
+        row.set(to, this.tuning.teleportWeight);
       }
     }
 
@@ -286,12 +304,15 @@ export class BayesianLocator implements Locator {
     obsY: number,
   ): number {
     const edge = this.edgeData.get(edgeKey(from, to));
-    const width = edge?.width ?? DEFAULT_DOOR_WIDTH;
+    const width = edge?.width ?? this.tuning.defaultDoorWidth;
     if (!edge?.door) return width; // no door info → always available at baseline
     const dx = obsX - edge.door[0];
     const dy = obsY - edge.door[1];
     const d = Math.sqrt(dx * dx + dy * dy);
-    const prox = Math.max(PROX_FLOOR, Math.exp(-d / PROX_SIGMA));
+    const prox = Math.max(
+      this.tuning.proximityFloor,
+      Math.exp(-d / this.tuning.proximitySigmaM),
+    );
     return width * prox;
   }
 

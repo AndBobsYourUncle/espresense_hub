@@ -42,6 +42,10 @@ interface MapToolContextValue {
    */
   hiddenLocators: ReadonlySet<string>;
   toggleLocator: (key: string) => void;
+  /** Bulk replace the hidden set — used by the "show all debug" legend toggle. */
+  setHiddenLocators: (
+    next: ReadonlySet<string> | ((prev: ReadonlySet<string>) => ReadonlySet<string>),
+  ) => void;
 }
 
 const MapToolContext = createContext<MapToolContextValue | null>(null);
@@ -64,8 +68,20 @@ export default function MapToolProvider({
     null,
   );
   const [compareMode, setCompareMode] = useState(false);
+  // Default hidden set: the "debug alternatives" (IDW, Nelder-Mead, BFGS,
+  // MLE, Nearest, upstream companion). Compare mode shows Room-Aware
+  // (active) and Bayesian (smart) as the primary comparison by default;
+  // the other algorithms are collapsed behind a legend "show all" toggle
+  // so the typical user isn't drowning in ghost dots.
   const [hiddenLocators, setHiddenLocators] = useState<ReadonlySet<string>>(
-    new Set(),
+    new Set([
+      "nadaraya_watson",
+      "nelder_mead",
+      "bfgs",
+      "mle",
+      "nearest_node",
+      "upstream_companion",
+    ]),
   );
 
   const toggleLocator = useCallback((key: string) => {
@@ -111,6 +127,7 @@ export default function MapToolProvider({
         setCompareMode,
         hiddenLocators,
         toggleLocator,
+        setHiddenLocators,
       }}
     >
       {children}

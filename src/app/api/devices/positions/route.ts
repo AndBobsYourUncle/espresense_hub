@@ -55,7 +55,27 @@ export interface DevicePositionDTO {
    */
   locatorDeltas?: Record<
     string,
-    { mean: number; stddev: number; count: number; lastUpdatedMs: number }
+    {
+      mean: number;
+      stddev: number;
+      count: number;
+      /**
+       * 0..1 — fraction of samples where this locator's position was in
+       * a different room than the active locator's. High values mean
+       * "this locator disagrees on the room assignment a lot" — more
+       * actionable than raw distance for presence-automation diagnostics.
+       */
+      disagreeRate: number;
+      /**
+       * 0..1 — strict subset of disagreeRate: fraction where one locator
+       * was *inside a room* and the other was *outside all rooms*. This
+       * is the presence-automation-breaking case (device drifts outside
+       * for a tick, away automation fires) — arguably the most valuable
+       * diagnostic for "is the Bayesian layer actually helping."
+       */
+      insideOutsideRate: number;
+      lastUpdatedMs: number;
+    }
   >;
 }
 
@@ -99,12 +119,20 @@ export function GET() {
               const mean = s.count > 0 ? s.sum / s.count : 0;
               const variance =
                 s.count > 0 ? Math.max(0, s.sumSq / s.count - mean * mean) : 0;
+              // 0..1 — fraction of samples where this locator put the
+              // device in a different room than the active locator.
+              const disagreeRate =
+                s.count > 0 ? s.roomDisagreeCount / s.count : 0;
+              const insideOutsideRate =
+                s.count > 0 ? s.insideOutsideDisagreeCount / s.count : 0;
               return [
                 algo,
                 {
                   mean,
                   stddev: Math.sqrt(variance),
                   count: Math.round(s.count),
+                  disagreeRate,
+                  insideOutsideRate,
                   lastUpdatedMs: s.lastUpdatedMs,
                 },
               ];

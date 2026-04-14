@@ -334,10 +334,53 @@ export const BayesianSchema = z
      * Master switch for the Bayesian tracker. When `true` (default) the
      * tracker runs alongside the other locators and shows as an extra
      * dot in the map's alternatives view. Set to `false` to skip the
-     * extra compute entirely — useful on low-powered hosts or when
-     * you're not interested in graph-aware smoothing.
+     * extra compute entirely.
+     *
+     * Service restart required to toggle (the locator bundle is built
+     * once at bootstrap); all other bayesian knobs below are live-reloaded.
      */
     enabled: z.boolean().default(true),
+    /**
+     * Stay-weight: unnormalized weight for "device remains in its current
+     * room" per tick. Higher = more stable tracking, slower transitions.
+     * Normalized against outgoing transition weights, so the effective
+     * stay probability depends on both this and how many doors are nearby.
+     * 1.6 gives ~0.87 stay prob mid-room with 3 neighbors.
+     */
+    stay_weight: z.number().positive().default(1.6),
+    /**
+     * Teleport-weight: unnormalized weight for transitioning to a
+     * non-adjacent room (i.e. one not reachable via `open_to` or shared
+     * `floor_area`). Kept small but non-zero so a badly-committed state
+     * can eventually recover with enough contrary evidence. Set to 0 to
+     * strictly forbid non-adjacent transitions (recovery from mistakes
+     * requires a transition through adjacent rooms).
+     */
+    teleport_weight: z.number().min(0).default(0.001),
+    /**
+     * Proximity falloff length (metres) for the door-proximity transition
+     * prior. A device at distance `d` from a door's centre gets a
+     * proximity factor of `exp(-d / proximity_sigma_m)`, clamped to
+     * `[proximity_floor, 1]`. Larger values make transitions easier from
+     * further away; smaller values require the device to be right at
+     * the doorway. 1.5 m is a reasonable default for ~1 Hz message
+     * cadences.
+     */
+    proximity_sigma_m: z.number().positive().default(1.5),
+    /**
+     * Minimum proximity factor for door-adjacent transitions. Without a
+     * floor, being far from every door would zero out all transition
+     * probability and the posterior would get stuck. 0.05 keeps
+     * transitions possible at ~5% of their "at the door" weight even
+     * when the device is nowhere near any specific door.
+     */
+    proximity_floor: z.number().min(0).max(1).default(0.05),
+    /**
+     * Default door width (metres) when an `open_to` edge doesn't specify
+     * its own `width`. Matches the renderer's default. Wider = higher
+     * baseline transition weight through that door.
+     */
+    default_door_width_m: z.number().positive().default(0.8),
   })
   .prefault({});
 

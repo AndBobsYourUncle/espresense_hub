@@ -8,6 +8,7 @@ import {
 import { getCurrentConfig } from "@/lib/config/current";
 import { buildLocator, computeDevicePosition } from "@/lib/locators";
 import { leaveOneOutResiduals } from "@/lib/locators/calibration";
+import { findRoom } from "@/lib/locators/room_aware";
 import { publishPresence } from "@/lib/presence";
 import {
   getStore,
@@ -337,7 +338,12 @@ export function attachHandlers(client: MqttClient): void {
         // Compute every alternative locator's result so the comparison
         // view can show all of them as ghost markers. Each alt is a
         // single-pass solve over the same fixes — cheap.
+        //
+        // The Bayesian alternative (if present) is captured separately
+        // so it can drive the parallel "smart" HA tracker in addition
+        // to appearing as a ghost marker.
         const alternatives = [];
+        let bayesianResult: ReturnType<typeof computeDevicePosition> = null;
         for (const alt of altLocators) {
           const r = computeDevicePosition(
             device,
@@ -352,6 +358,7 @@ export function attachHandlers(client: MqttClient): void {
               z: r.z,
               algorithm: r.algorithm,
             });
+            if (r.algorithm === "bayesian") bayesianResult = r;
           }
         }
         store.setDevicePosition(device.id, {
@@ -368,24 +375,40 @@ export function attachHandlers(client: MqttClient): void {
             deviceId: device.id,
             deviceName: device.name ?? device.id,
             position: result,
+            bayesianPosition: bayesianResult ?? undefined,
             config,
           }).catch((err) => {
             console.error("[presence] publish failed:", (err as Error).message);
           });
         }
 
-        // Update per-locator comparison stats: distance from each
-        // alternative's output to ours (after our active position has
-        // been written). Cheap — a sqrt per alt.
+        // Update per-locator comparison stats: distance + room-agreement
+        // from each alternative's output to ours (after our active
+        // position has been written). Cheap — a sqrt + a point-in-polygon
+        // test per alt. The room flag lets the compare view surface
+        // "locator X disagreed with Room-Aware on the room X% of the
+        // time" — a much more load-bearing diagnostic than raw distance,
+        // since small positional drifts across a wall are exactly what
+        // break presence automations.
         const stored = store.devices.get(device.id);
         if (stored?.position) {
+          const allRooms = config.floors.flatMap((f) => f.rooms);
+          const activeRoomId = findRoom(allRooms, [
+            stored.position.x,
+            stored.position.y,
+          ]);
+          const activeInside = activeRoomId !== null;
           for (const alt of alternatives) {
             const dx = alt.x - stored.position.x;
             const dy = alt.y - stored.position.y;
+            const altRoomId = findRoom(allRooms, [alt.x, alt.y]);
+            const altInside = altRoomId !== null;
             store.recordLocatorComparison(
               stored,
               alt.algorithm,
               Math.sqrt(dx * dx + dy * dy),
+              altRoomId !== activeRoomId,
+              altInside !== activeInside,
             );
           }
         }

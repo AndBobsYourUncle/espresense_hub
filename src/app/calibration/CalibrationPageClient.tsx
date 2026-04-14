@@ -963,6 +963,18 @@ function LocatorComparisonPanel() {
                   <th className="text-left font-normal py-1">locator</th>
                   <th className="text-right font-normal py-1">mean Δ</th>
                   <th className="text-right font-normal py-1">σ</th>
+                  <th
+                    className="text-right font-normal py-1"
+                    title="Fraction of samples where this locator disagreed with Room-Aware on the room assignment (includes 'one inside, other between rooms')"
+                  >
+                    room Δ
+                  </th>
+                  <th
+                    className="text-right font-normal py-1"
+                    title="Strict subset of room Δ: samples where one locator was INSIDE a room and the other was OUTSIDE all rooms. This is the presence-automation-breaking case — a device 'drifting outside' for a tick flips away automations."
+                  >
+                    in/out Δ
+                  </th>
                   <th className="text-right font-normal py-1">samples</th>
                 </tr>
               </thead>
@@ -980,6 +992,28 @@ function LocatorComparisonPanel() {
                     </td>
                     <td className="py-1 text-right text-zinc-500 dark:text-zinc-400">
                       {formatDistanceDisplay(a.stddev, units)}
+                    </td>
+                    <td
+                      className={`py-1 text-right ${
+                        a.disagreeRate < 0.05
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : a.disagreeRate < 0.2
+                            ? "text-zinc-500 dark:text-zinc-400"
+                            : "text-amber-600 dark:text-amber-400"
+                      }`}
+                    >
+                      {(a.disagreeRate * 100).toFixed(1)}%
+                    </td>
+                    <td
+                      className={`py-1 text-right ${
+                        a.insideOutsideRate < 0.01
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : a.insideOutsideRate < 0.05
+                            ? "text-zinc-500 dark:text-zinc-400"
+                            : "text-red-600 dark:text-red-400"
+                      }`}
+                    >
+                      {(a.insideOutsideRate * 100).toFixed(2)}%
                     </td>
                     <td className="py-1 text-right text-zinc-500 dark:text-zinc-400">
                       {a.count.toLocaleString()}
@@ -1048,6 +1082,30 @@ function LocatorComparisonPanel() {
                                 <td className="py-1 px-3 text-right text-zinc-500 dark:text-zinc-400 w-20">
                                   ±{formatDistanceDisplay(s.stddev, units)}
                                 </td>
+                                <td
+                                  className={`py-1 px-3 text-right w-16 ${
+                                    (s.disagreeRate ?? 0) < 0.05
+                                      ? "text-emerald-600 dark:text-emerald-400"
+                                      : (s.disagreeRate ?? 0) < 0.2
+                                        ? "text-zinc-500 dark:text-zinc-400"
+                                        : "text-amber-600 dark:text-amber-400"
+                                  }`}
+                                  title="Room disagreement rate"
+                                >
+                                  {((s.disagreeRate ?? 0) * 100).toFixed(1)}%
+                                </td>
+                                <td
+                                  className={`py-1 px-3 text-right w-16 ${
+                                    (s.insideOutsideRate ?? 0) < 0.01
+                                      ? "text-emerald-600 dark:text-emerald-400"
+                                      : (s.insideOutsideRate ?? 0) < 0.05
+                                        ? "text-zinc-500 dark:text-zinc-400"
+                                        : "text-red-600 dark:text-red-400"
+                                  }`}
+                                  title="Inside/outside disagreement rate — presence automation breaker"
+                                >
+                                  {((s.insideOutsideRate ?? 0) * 100).toFixed(2)}%
+                                </td>
                                 <td className="py-1 px-3 text-right text-zinc-500 dark:text-zinc-400 w-20">
                                   {s.count.toLocaleString()}
                                 </td>
@@ -1082,11 +1140,20 @@ function LocatorComparisonPanel() {
  */
 function useAggregates(
   data: DevicePositionsResponse | null,
-): Array<{ key: string; mean: number; stddev: number; count: number }> {
+): Array<{
+  key: string;
+  mean: number;
+  stddev: number;
+  count: number;
+  disagreeRate: number;
+  insideOutsideRate: number;
+}> {
   if (!data) return [];
   const sumByAlgo = new Map<string, number>();
   const sumSqByAlgo = new Map<string, number>();
   const countByAlgo = new Map<string, number>();
+  const disagreeByAlgo = new Map<string, number>();
+  const insideOutsideByAlgo = new Map<string, number>();
   for (const d of data.devices) {
     if (!d.locatorDeltas) continue;
     for (const [algo, s] of Object.entries(d.locatorDeltas)) {
@@ -1096,12 +1163,26 @@ function useAggregates(
       const sum = s.mean * s.count;
       const variance = s.stddev * s.stddev;
       const sumSq = (variance + s.mean * s.mean) * s.count;
+      const disagreeCount = (s.disagreeRate ?? 0) * s.count;
+      const inOutCount = (s.insideOutsideRate ?? 0) * s.count;
       sumByAlgo.set(algo, (sumByAlgo.get(algo) ?? 0) + sum);
       sumSqByAlgo.set(algo, (sumSqByAlgo.get(algo) ?? 0) + sumSq);
       countByAlgo.set(algo, (countByAlgo.get(algo) ?? 0) + s.count);
+      disagreeByAlgo.set(algo, (disagreeByAlgo.get(algo) ?? 0) + disagreeCount);
+      insideOutsideByAlgo.set(
+        algo,
+        (insideOutsideByAlgo.get(algo) ?? 0) + inOutCount,
+      );
     }
   }
-  const out: Array<{ key: string; mean: number; stddev: number; count: number }> = [];
+  const out: Array<{
+    key: string;
+    mean: number;
+    stddev: number;
+    count: number;
+    disagreeRate: number;
+    insideOutsideRate: number;
+  }> = [];
   for (const [algo, count] of countByAlgo) {
     if (count <= 0) continue;
     const mean = (sumByAlgo.get(algo) ?? 0) / count;
@@ -1109,7 +1190,16 @@ function useAggregates(
       0,
       (sumSqByAlgo.get(algo) ?? 0) / count - mean * mean,
     );
-    out.push({ key: algo, mean, stddev: Math.sqrt(variance), count });
+    const disagreeRate = (disagreeByAlgo.get(algo) ?? 0) / count;
+    const insideOutsideRate = (insideOutsideByAlgo.get(algo) ?? 0) / count;
+    out.push({
+      key: algo,
+      mean,
+      stddev: Math.sqrt(variance),
+      count,
+      disagreeRate,
+      insideOutsideRate,
+    });
   }
   return out;
 }
