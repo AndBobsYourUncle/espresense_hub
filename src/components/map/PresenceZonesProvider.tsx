@@ -122,9 +122,7 @@ export default function PresenceZonesProvider({
       const newZone: PresenceZone = {
         id,
         label: trimmed,
-        type: "rooms",
         rooms: [],
-        transition_threshold: 0.85,
       };
       // Auto-select the new zone so the user can immediately assign rooms.
       setSelectedZoneId(id);

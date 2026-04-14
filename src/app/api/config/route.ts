@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { applyRuntimeConfig } from "@/lib/bootstrap";
 import { loadConfig } from "@/lib/config";
+import { setCurrentConfig } from "@/lib/config/current";
 import {
   ConfigWriteError,
   readRawConfig,
@@ -86,13 +88,22 @@ export async function PUT(request: Request): Promise<Response> {
     );
   }
 
-  // Refresh the in-memory nodeIndex so the locator picks up new node
-  // positions starting with the very next message. Other things (MQTT
-  // host, history DB) only re-read on bootstrap, so flag whether a
-  // restart is recommended.
+  // Re-parse the freshly-written YAML and push it into the live-config
+  // holder so the MQTT handler, presence publisher, device cleanup, and
+  // stateful filter singletons all pick up the new values on the next tick.
+  // Node positions are also refreshed in the shared nodeIndex so the
+  // locator reflects them immediately.
+  //
+  // What still requires a restart: MQTT connection settings (broker host,
+  // credentials) — the client is constructed once. Also the auto-apply
+  // setInterval cadence: changing `optimization.interval_secs` updates the
+  // value the next cycle uses, but the setInterval's own timer was wired
+  // with the old cadence at bootstrap.
   let liveReloadOk = true;
   try {
     const config = await loadConfig();
+    setCurrentConfig(config);
+    applyRuntimeConfig(config);
     const store = getStore();
     store.nodeIndex.clear();
     for (const n of config.nodes) {
@@ -107,6 +118,6 @@ export async function PUT(request: Request): Promise<Response> {
     configPath: result.configPath,
     bytes: result.bytes,
     liveReloadOk,
-    note: "Node positions and rooms apply immediately. MQTT and bootstrap-time settings need a service restart.",
+    note: "Most changes apply live. MQTT broker connection changes need a service restart.",
   });
 }

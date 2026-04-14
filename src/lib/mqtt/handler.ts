@@ -5,7 +5,7 @@ import {
   deactivatePin,
   getActivePin,
 } from "@/lib/calibration/device_cal";
-import type { Config } from "@/lib/config";
+import { getCurrentConfig } from "@/lib/config/current";
 import { buildLocator, computeDevicePosition } from "@/lib/locators";
 import { leaveOneOutResiduals } from "@/lib/locators/calibration";
 import { publishPresence } from "@/lib/presence";
@@ -64,15 +64,22 @@ import { isDeviceTracked } from "./filter";
 /**
  * Wire the MQTT client to the store. Subscribes to ESPresense topics and
  * routes each inbound message through the appropriate parser + filter.
+ *
+ * Reads `config` fresh from `getCurrentConfig()` on each message rather than
+ * closing over a captured value, so changes saved via the Settings UI take
+ * effect immediately without a service restart.
  */
-export function attachHandlers(client: MqttClient, config: Config): void {
+export function attachHandlers(client: MqttClient): void {
   const store = getStore();
-  const { active: locator, alternatives: altLocators } = buildLocator(config);
-  // Read positions from the shared nodeIndex on every solve so live edits
-  // from the node editor are picked up immediately.
-  const staleAfterMs = config.timeout * 1000;
+  // Locator/alt-locators are built once — their configuration comes from
+  // config at bootstrap time. Locator config isn't actually read from
+  // `config.locators` at runtime (that section is a passthrough), so
+  // rebuilding on save wouldn't do anything useful.
+  const bootstrapConfig = getCurrentConfig();
+  const { active: locator, alternatives: altLocators } = buildLocator(bootstrapConfig);
 
   client.on("connect", () => {
+    const config = getCurrentConfig();
     store.setMqttStatus({
       status: "connected",
       host: config.mqtt.host,
@@ -106,6 +113,11 @@ export function attachHandlers(client: MqttClient, config: Config): void {
   });
 
   client.on("message", (topic, payload) => {
+    // Read config fresh per message so Settings UI saves take effect on the
+    // next inbound message rather than waiting for a service restart.
+    const config = getCurrentConfig();
+    const staleAfterMs = config.timeout * 1000;
+
     store.noteMqttMessage();
 
     const match = parseTopic(topic);

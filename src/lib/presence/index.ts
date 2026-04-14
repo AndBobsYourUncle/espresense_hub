@@ -190,13 +190,7 @@ function zoneState(
   loc: ResolvedLocation,
   zone: PresenceZone,
 ): string {
-  if (zone.type === "bayesian") {
-    // Bayesian tracker — not yet implemented. Falls back to room-level
-    // until the probabilistic layer is added.
-    return defaultState(loc);
-  }
-
-  // type: "rooms" — match against the list of room ids/names.
+  // Match against the list of room ids/names.
   if (loc.roomId != null) {
     const inZone = zone.rooms.some(
       (r) =>

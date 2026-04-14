@@ -93,13 +93,6 @@ export const OptimizationSchema = z
      * fewer flash writes at the cost of slower convergence.
      */
     min_delta: z.number().default(0.1),
-    /**
-     * Upstream-companion field — parsed for back-compat but ignored.
-     * Our calibration UI shows live state, not historical snapshots.
-     */
-    keep_snapshot_mins: z.number().int().default(5),
-    limits: z.record(z.string(), z.number()).default({}),
-    weights: z.record(z.string(), z.number()).default({}),
   })
   .prefault({});
 
@@ -122,9 +115,6 @@ export const FilteringSchema = z
      * = more responsive to direction changes, jitter creeps back in.
      * 0.5 is reasonable for a human walking; 1.5+ for a phone being
      * waved around. Only applies when position_filter = kalman.
-     *
-     * Note: distinct from upstream companion's `process_noise` field
-     * (which has different semantics — variance, not std dev).
      */
     kalman_process_noise: z.number().default(0.5),
     /**
@@ -133,19 +123,8 @@ export const FilteringSchema = z
      * so low-confidence fixes get less weight automatically. 0.5 m
      * works well with our locator stack. Only applies when
      * position_filter = kalman.
-     *
-     * Note: distinct from upstream companion's `measurement_noise`.
      */
     kalman_measurement_noise: z.number().default(0.5),
-    /**
-     * Upstream-companion fields, parsed for back-compat but currently
-     * unused by our pipeline. The companion's Kalman has different
-     * semantics from ours — see kalman_process_noise above. Safe to
-     * leave in your config; the locator will just ignore them.
-     */
-    process_noise: z.number().default(0.01),
-    measurement_noise: z.number().default(0.1),
-    max_velocity: z.number().default(0.5),
     /**
      * EMA smoothing weight, 0..1. Only applies when
      * position_filter = ema.
@@ -155,7 +134,6 @@ export const FilteringSchema = z
      *   1.0 → very heavy
      */
     smoothing_weight: z.number().default(0.4),
-    motion_sigma: z.number().default(2.0),
     /**
      * Room-hysteresis threshold, in milliseconds. When > 0, the HA presence
      * tracker requires a device to register in a new room for at least this
@@ -283,27 +261,23 @@ export const DeviceMatchSchema = z.object({
 
 /**
  * A "zone" is a derived Home Assistant device_tracker published alongside
- * the default room-level tracker. Each zone produces its own HA entity
- * with its own state string so automations can target coarser groupings
- * without needing helpers or complex OR conditions.
+ * the default room-level tracker. Each zone maps a named set of rooms to a
+ * single label — state is the label when the device is in any listed room,
+ * "not_home" otherwise. Each zone produces its own HA entity with its own
+ * state string so automations can target coarser groupings without needing
+ * helpers or complex OR conditions.
  *
- * type: "rooms" (default) — maps a named set of rooms to a single label.
- *   State = label when device is in any listed room, "not_home" otherwise.
- *
- * type: "bayesian" — future: probabilistic room model with hysteresis.
- *   Prevents flicker at room boundaries by requiring sustained evidence
- *   before committing a room transition.
+ * Probabilistic room models are a separate concern handled via the planned
+ * top-level `bayesian:` block (not a zone type), so this schema only covers
+ * rooms-list aggregation.
  */
 export const PresenceZoneSchema = z.object({
   /** Slug used in the MQTT topic and HA unique_id. */
   id: z.string(),
   /** Human-readable name for the HA entity. Defaults to id. */
   label: z.string().optional(),
-  type: z.enum(["rooms", "bayesian"]).default("rooms"),
-  /** For type "rooms": list of room ids/names that map to this zone. */
+  /** List of room ids/names that map to this zone. */
   rooms: z.array(z.string()).default([]),
-  /** For type "bayesian": minimum posterior to commit a room transition. */
-  transition_threshold: z.number().min(0).max(1).default(0.85),
 });
 
 export type PresenceZone = z.infer<typeof PresenceZoneSchema>;

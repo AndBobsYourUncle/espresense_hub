@@ -13,6 +13,8 @@ import {
   saveCalibration,
 } from "@/lib/state/calibration_persistence";
 import { loadConfig, ConfigNotFoundError } from "@/lib/config";
+import type { Config } from "@/lib/config";
+import { getCurrentConfig, setCurrentConfig } from "@/lib/config/current";
 import { connectMqtt } from "@/lib/mqtt/client";
 import { attachHandlers } from "@/lib/mqtt/handler";
 import { loadDevicePins, saveDevicePins } from "@/lib/state/device_persistence";
@@ -41,6 +43,32 @@ const globalForBootstrap = globalThis as unknown as {
 };
 
 /**
+ * Apply config values that drive stateful singletons (Kalman, smoothing, the
+ * auto-apply loop). Called at bootstrap and again by the config save endpoint
+ * so edits in the Settings UI take effect without a restart. Idempotent.
+ *
+ * Not covered here (require a process restart): MQTT connection settings,
+ * the auto-apply setInterval cadence (the interval was wired once at bootstrap
+ * and can't change mid-flight without tearing down and rebuilding it).
+ */
+export function applyRuntimeConfig(config: Config): void {
+  setMeasurementSmoothingWeight(config.filtering.smoothing_weight);
+  setPositionSmoothingWeight(config.filtering.smoothing_weight);
+  setPositionFilter(config.filtering.position_filter);
+  setKalmanProcessNoise(config.filtering.kalman_process_noise);
+  setKalmanMeasurementNoise(config.filtering.kalman_measurement_noise);
+
+  const isOurOptimizer =
+    config.optimization.optimizer === "streaming_per_pair";
+  const autoApplyOn = config.optimization.enabled && isOurOptimizer;
+  setAutoApplyConfig({
+    enabled: autoApplyOn,
+    intervalSecs: config.optimization.interval_secs,
+    minDelta: config.optimization.min_delta,
+  });
+}
+
+/**
  * One-shot server-side initialization: read config, connect MQTT, subscribe.
  *
  * Called from `instrumentation.ts` so it runs once per Node.js server start.
@@ -54,6 +82,9 @@ export async function bootstrap(): Promise<void> {
 
   try {
     const config = await loadConfig();
+    // Publish to the live-config holder before anything else: the handler
+    // and every interval below read from it via getCurrentConfig().
+    setCurrentConfig(config);
 
     if (!config.mqtt.host) {
       console.warn(
@@ -72,37 +103,18 @@ export async function bootstrap(): Promise<void> {
       if (n.id && n.point) store.nodeIndex.set(n.id, n.point);
     }
 
-    // Apply the user's filtering config. The input-side measurement
-    // smoothing always runs (averages RSSI noise per node before
-    // solving) and uses smoothing_weight regardless of which output
-    // filter is active. The output-side filter is selectable.
-    setMeasurementSmoothingWeight(config.filtering.smoothing_weight);
-    setPositionSmoothingWeight(config.filtering.smoothing_weight);
-    setPositionFilter(config.filtering.position_filter);
-    setKalmanProcessNoise(config.filtering.kalman_process_noise);
-    setKalmanMeasurementNoise(config.filtering.kalman_measurement_noise);
+    // Apply the user's filtering + auto-apply config to the stateful
+    // singletons. Same logic the save endpoint re-runs on live-reload.
+    applyRuntimeConfig(config);
     console.log(
       `[bootstrap] filter=${config.filtering.position_filter} ` +
         `kalman_process_noise=${config.filtering.kalman_process_noise} ` +
         `kalman_measurement_noise=${config.filtering.kalman_measurement_noise} ` +
         `smoothing_weight=${config.filtering.smoothing_weight}`,
     );
-
-    // Apply auto-apply config. The loop runs only when:
-    //   - `optimization.enabled` is true (master switch), AND
-    //   - `optimization.optimizer` is `streaming_per_pair` (our
-    //     pipeline). The upstream companion's optimizer values
-    //     (per_node_absorption, global_absorption, legacy) are not
-    //     implemented here, so picking one effectively disables
-    //     auto-apply rather than silently doing the wrong thing.
-    const isOurOptimizer =
+    const autoApplyOn =
+      config.optimization.enabled &&
       config.optimization.optimizer === "streaming_per_pair";
-    const autoApplyOn = config.optimization.enabled && isOurOptimizer;
-    setAutoApplyConfig({
-      enabled: autoApplyOn,
-      intervalSecs: config.optimization.interval_secs,
-      minDelta: config.optimization.min_delta,
-    });
     console.log(
       `[bootstrap] auto-apply enabled=${autoApplyOn} ` +
         `(switch=${config.optimization.enabled}, ` +
@@ -136,7 +148,7 @@ export async function bootstrap(): Promise<void> {
     });
 
     const client = connectMqtt(config);
-    attachHandlers(client, config);
+    attachHandlers(client);
     console.log(
       `[bootstrap] MQTT initialized for ${config.mqtt.host}:${config.mqtt.port}`,
     );
@@ -204,8 +216,10 @@ export async function bootstrap(): Promise<void> {
     // Device away-timeout + retention cleanup — runs every 30 s.
     // Marks devices as away when lastSeen exceeds away_timeout, and
     // removes them from memory when lastSeen exceeds device_retention.
+    // Reads fresh config each tick so timeout/retention edits take effect
+    // on the next cycle without a restart.
     setInterval(() => {
-      runDeviceCleanup(store, config).catch((err) =>
+      runDeviceCleanup(store, getCurrentConfig()).catch((err) =>
         console.error("[bootstrap] device cleanup failed:", (err as Error).message),
       );
     }, 30_000);

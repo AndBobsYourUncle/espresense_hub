@@ -849,7 +849,7 @@ function FilteringTab({ doc, setField }: DocProps) {
 
       <Section
         title="Room hysteresis"
-        description="Smooths HA room-tracker flicker when a device wobbles at a wall boundary. Only affects published state — the map still shows the raw position. No restart needed."
+        description="Smooths HA room-tracker flicker when a device wobbles at a wall boundary. Only affects published state — the map still shows the raw position. Service restart required."
       >
         <Field
           label="Room stability window"
@@ -1385,6 +1385,75 @@ function RoomsTab({ doc, setField, addToList, deleteAt }: DocListProps) {
                         }}
                         placeholder="Hallway, Kitchen"
                       />
+                      {/* Door position editor per connection. Editing x/y
+                          directly here is a pragmatic shortcut — spatial
+                          click-to-place on the map tool is still available,
+                          but typing coords is faster for tweaks. */}
+                      {objsByid.size > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {[...objsByid.values()].map((e) => {
+                            const [dx, dy] = e.door ?? [0, 0];
+                            const updateDoor = (newX: number | undefined, newY: number | undefined) => {
+                              const x = newX ?? dx;
+                              const y = newY ?? dy;
+                              // Rebuild open_to preserving order; swap this
+                              // entry's door while leaving everything else alone.
+                              const next = rawOpenTo.map((entry) => {
+                                if (typeof entry === "string") return entry;
+                                if (entry.id !== e.id) return entry;
+                                return { ...entry, door: [x, y] as [number, number] };
+                              });
+                              setField(["floors", fi, "rooms", ri, "open_to"], next);
+                            };
+                            const clearDoor = () => {
+                              const next = rawOpenTo.map((entry) => {
+                                if (typeof entry === "string") return entry;
+                                if (entry.id !== e.id) return entry;
+                                return entry.id; // downgrade to plain string
+                              });
+                              setField(["floors", fi, "rooms", ri, "open_to"], next);
+                            };
+                            return (
+                              <div key={e.id} className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs text-zinc-700 dark:text-zinc-300 w-24 truncate">
+                                  {e.id}
+                                </span>
+                                <span className="text-[11px] text-zinc-400">x</span>
+                                <input
+                                  type="number"
+                                  step={0.01}
+                                  value={dx}
+                                  onChange={(ev) => {
+                                    const v = Number(ev.target.value);
+                                    if (Number.isFinite(v)) updateDoor(v, undefined);
+                                  }}
+                                  className="w-20 h-7 px-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                                <span className="text-[11px] text-zinc-400">y</span>
+                                <input
+                                  type="number"
+                                  step={0.01}
+                                  value={dy}
+                                  onChange={(ev) => {
+                                    const v = Number(ev.target.value);
+                                    if (Number.isFinite(v)) updateDoor(undefined, v);
+                                  }}
+                                  className="w-20 h-7 px-1.5 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs font-mono tabular-nums focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={clearDoor}
+                                  className="h-6 w-6 inline-flex items-center justify-center rounded text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                  title="Clear door position (keep connection)"
+                                  aria-label="Clear door"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </MiniField>
                   </ListRow>
                 );
@@ -1409,9 +1478,7 @@ function RoomsTab({ doc, setField, addToList, deleteAt }: DocListProps) {
 interface PresenceZoneData {
   id?: string;
   label?: string;
-  type?: "rooms" | "bayesian";
   rooms?: string[];
-  transition_threshold?: number;
 }
 
 function PresenceTab({ doc, setField, addToList, deleteAt }: DocListProps) {
@@ -1448,46 +1515,18 @@ function PresenceTab({ doc, setField, addToList, deleteAt }: DocListProps) {
                   placeholder="Master Suite"
                 />
               </MiniField>
-              <MiniField label="Type">
-                <Select<"rooms" | "bayesian">
-                  value={z.type ?? "rooms"}
-                  onChange={(v) => setField(["presence", "zones", i, "type"], v)}
-                  options={[
-                    { value: "rooms", label: "Rooms", hint: "Map a list of rooms to one label" },
-                    { value: "bayesian", label: "Bayesian", hint: "Probabilistic — coming soon" },
-                  ]}
+              <MiniField
+                label="Rooms"
+                hint="Comma-separated room ids/names. Device is 'in zone' when it's in any of these rooms."
+              >
+                <CommaList
+                  value={z.rooms ?? []}
+                  onChange={(v) =>
+                    setField(["presence", "zones", i, "rooms"], v ?? [])
+                  }
+                  placeholder="master_bedroom, master_bathroom, master_closet"
                 />
               </MiniField>
-              {(z.type ?? "rooms") === "rooms" && (
-                <MiniField
-                  label="Rooms"
-                  hint="Comma-separated room ids/names. Device is 'in zone' when it's in any of these rooms."
-                >
-                  <CommaList
-                    value={z.rooms ?? []}
-                    onChange={(v) =>
-                      setField(["presence", "zones", i, "rooms"], v ?? [])
-                    }
-                    placeholder="master_bedroom, master_bathroom, master_closet"
-                  />
-                </MiniField>
-              )}
-              {(z.type ?? "rooms") === "bayesian" && (
-                <MiniField
-                  label="Transition threshold"
-                  hint="Minimum posterior probability (0–1) to commit a room change."
-                >
-                  <NumberInput
-                    value={z.transition_threshold ?? 0.85}
-                    onChange={(v) =>
-                      setField(["presence", "zones", i, "transition_threshold"], v)
-                    }
-                    min={0}
-                    max={1}
-                    step={0.05}
-                  />
-                </MiniField>
-              )}
             </ListRow>
           ))
         )}
@@ -1497,7 +1536,6 @@ function PresenceTab({ doc, setField, addToList, deleteAt }: DocListProps) {
             addToList(["presence", "zones"], {
               id: "new_zone",
               label: "New Zone",
-              type: "rooms",
               rooms: [],
             })
           }
