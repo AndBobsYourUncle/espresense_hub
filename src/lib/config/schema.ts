@@ -46,30 +46,6 @@ export const OptimizationSchema = z
     /** Master switch for the auto-apply background loop. */
     enabled: z.boolean().default(true),
     /**
-     * Which optimization pipeline runs.
-     *
-     *   streaming_per_pair (default) — our pipeline. Streaming
-     *     sufficient stats per (listener, transmitter) pair, online
-     *     decay, small frequent deltas pushed to firmware. Designed
-     *     to converge continuously while you live in the house.
-     *
-     *   per_node_absorption / global_absorption / legacy — upstream
-     *     companion's batch optimizers. Our code doesn't implement
-     *     any of these, so picking one effectively disables the
-     *     auto-apply loop (equivalent to `enabled: false`). Kept
-     *     parseable so existing companion configs roll over without
-     *     errors. Pick `streaming_per_pair` to actually use our
-     *     pipeline.
-     */
-    optimizer: z
-      .enum([
-        "streaming_per_pair",
-        "global_absorption",
-        "per_node_absorption",
-        "legacy",
-      ])
-      .default("streaming_per_pair"),
-    /**
      * How often the auto-apply loop runs, in seconds. Default 300
      * (5 min) — much faster than the upstream companion's hourly
      * cadence because our streaming-stats approach favors many small

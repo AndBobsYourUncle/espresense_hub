@@ -58,11 +58,8 @@ export function applyRuntimeConfig(config: Config): void {
   setKalmanProcessNoise(config.filtering.kalman_process_noise);
   setKalmanMeasurementNoise(config.filtering.kalman_measurement_noise);
 
-  const isOurOptimizer =
-    config.optimization.optimizer === "streaming_per_pair";
-  const autoApplyOn = config.optimization.enabled && isOurOptimizer;
   setAutoApplyConfig({
-    enabled: autoApplyOn,
+    enabled: config.optimization.enabled,
     intervalSecs: config.optimization.interval_secs,
     minDelta: config.optimization.min_delta,
   });
@@ -112,13 +109,8 @@ export async function bootstrap(): Promise<void> {
         `kalman_measurement_noise=${config.filtering.kalman_measurement_noise} ` +
         `smoothing_weight=${config.filtering.smoothing_weight}`,
     );
-    const autoApplyOn =
-      config.optimization.enabled &&
-      config.optimization.optimizer === "streaming_per_pair";
     console.log(
-      `[bootstrap] auto-apply enabled=${autoApplyOn} ` +
-        `(switch=${config.optimization.enabled}, ` +
-        `optimizer=${config.optimization.optimizer}) ` +
+      `[bootstrap] auto-apply enabled=${config.optimization.enabled} ` +
         `interval=${config.optimization.interval_secs}s ` +
         `min_delta=${config.optimization.min_delta}`,
     );

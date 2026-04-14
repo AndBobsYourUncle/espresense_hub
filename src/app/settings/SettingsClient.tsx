@@ -867,52 +867,11 @@ function FilteringTab({ doc, setField }: DocProps) {
 
       <Section
         title="Auto-apply"
-        description="Background loop that pushes small calibration deltas to firmware over MQTT. Per-node rate limit (10 min) and minimum delta gate every push. Service restart required."
+        description="Background loop that pushes small streaming-per-pair calibration deltas to firmware over MQTT. Per-node rate limit (10 min) and minimum delta gate every push."
       >
         <Field
-          label="Algorithm"
-          hint="Streaming per-pair is our pipeline (recommended). The upstream-companion options aren't implemented here — picking one effectively disables auto-apply but leaves the value in your config for compatibility."
-        >
-          <Select<
-            | "streaming_per_pair"
-            | "per_node_absorption"
-            | "global_absorption"
-            | "legacy"
-          >
-            value={get<
-              | "streaming_per_pair"
-              | "per_node_absorption"
-              | "global_absorption"
-              | "legacy"
-            >(doc, ["optimization", "optimizer"], "streaming_per_pair")}
-            onChange={(v) => setField(["optimization", "optimizer"], v)}
-            options={[
-              {
-                value: "streaming_per_pair",
-                label: "Streaming per-pair",
-                hint: "Our pipeline (recommended)",
-              },
-              {
-                value: "per_node_absorption",
-                label: "Per-node (compat, no-op)",
-                hint: "Upstream companion option — does nothing here",
-              },
-              {
-                value: "global_absorption",
-                label: "Global (compat, no-op)",
-                hint: "Upstream companion option — does nothing here",
-              },
-              {
-                value: "legacy",
-                label: "Legacy (compat, no-op)",
-                hint: "Upstream companion option — does nothing here",
-              },
-            ]}
-          />
-        </Field>
-        <Field
           label="Enabled"
-          hint="Master switch. When off, the loop never runs even with a supported algorithm selected. You can still manually preview + apply via the calibration page."
+          hint="Master switch. When off, the loop never runs. You can still manually preview + apply via the calibration page."
         >
           <Toggle
             value={get<boolean>(doc, ["optimization", "enabled"], true)}
