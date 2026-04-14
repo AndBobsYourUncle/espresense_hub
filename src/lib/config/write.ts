@@ -1,8 +1,50 @@
 import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { isMap, isSeq, parseDocument } from "yaml";
+import { type Document, isMap, isSeq, parseDocument } from "yaml";
 import { resolveConfigPath } from "./load";
 import { ConfigSchema, openToId, slugify } from "./schema";
+
+/**
+ * Round a coordinate to the precision the map tool can realistically produce.
+ * 3 decimals = 1 mm, already finer than the pixel → meters conversion on a
+ * typical floorplan. Keeps `config.yaml` legible — `5.500` instead of
+ * `5.499930648803712` from rounding artifacts.
+ */
+function roundCoord(n: number): number {
+  return Math.round(n * 1000) / 1000;
+}
+
+/**
+ * Build a YAML Node for an `open_to` array where each entry's `door`
+ * tuple is written as an inline `[x, y]` flow sequence — matching the
+ * style used elsewhere in `config.yaml` for polygon points and floor
+ * bounds. Without this, the default serializer writes the 2-element
+ * door as a block sequence spread over three lines, which is noisy.
+ */
+function buildOpenToNode(
+  doc: Document,
+  openTo: Array<string | { id: string; door?: [number, number] }>,
+): unknown {
+  const node = doc.createNode(
+    openTo.map((entry) => {
+      if (typeof entry === "string") return entry;
+      if (!entry.door) return { id: entry.id };
+      return {
+        id: entry.id,
+        door: [roundCoord(entry.door[0]), roundCoord(entry.door[1])],
+      };
+    }),
+  );
+  // Walk the resulting sequence and flip the door child arrays to flow style.
+  if (isSeq(node)) {
+    for (const item of node.items) {
+      if (!isMap(item)) continue;
+      const doorItem = item.get("door", true);
+      if (isSeq(doorItem)) doorItem.flow = true;
+    }
+  }
+  return node;
+}
 
 /**
  * Round-trip-safe writer for `config.yaml`. Uses the `yaml` Document API so
@@ -347,7 +389,10 @@ export async function updateRoomRelations(
     );
   }
 
-  doc.setIn(["floors", floorIdx, "rooms", roomIdx, "open_to"], openTo);
+  doc.setIn(
+    ["floors", floorIdx, "rooms", roomIdx, "open_to"],
+    buildOpenToNode(doc, openTo),
+  );
 
   const roomNode = doc.getIn(["floors", floorIdx, "rooms", roomIdx]);
   if (isMap(roomNode)) {
@@ -377,10 +422,13 @@ export async function updateRoomRelations(
       if (!Array.isArray(otherOpenTo)) continue;
       // Filter out any entry whose id resolves to the editing roomId.
       // Entries may be strings or {id, door?} objects (mixed is fine).
-      const filtered = (otherOpenTo as Array<unknown>).filter(
-        (entry) => openToId(entry as string | { id: string }) !== roomId,
+      const filtered = (otherOpenTo as Array<string | { id: string; door?: [number, number] }>).filter(
+        (entry) => openToId(entry) !== roomId,
       );
-      doc.setIn(["floors", floorIdx, "rooms", r, "open_to"], filtered);
+      doc.setIn(
+        ["floors", floorIdx, "rooms", r, "open_to"],
+        buildOpenToNode(doc, filtered),
+      );
     }
   }
 
