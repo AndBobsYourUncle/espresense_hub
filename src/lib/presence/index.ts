@@ -1,5 +1,3 @@
-"use server";
-
 import type { Config } from "@/lib/config";
 import type { PresenceZone } from "@/lib/config/schema";
 import { findRoom } from "@/lib/locators/room_aware";
