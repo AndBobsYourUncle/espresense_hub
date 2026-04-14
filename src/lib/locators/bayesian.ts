@@ -24,6 +24,26 @@ interface TuningParams {
   proximitySigmaM: number;
   proximityFloor: number;
   defaultDoorWidth: number;
+  commitDwellMs: number;
+  commitMargin: number;
+  blendThreshold: number;
+}
+
+/**
+ * Per-device committed-room state. The posterior's argmax is the
+ * *candidate* room; the committed room is what the locator actually
+ * emits. Requires the candidate to dominate for `commitDwellMs` OR
+ * exceed the committed room's posterior by `commitMargin` before
+ * promoting — filters out brief argmax spikes from RSSI noise as the
+ * device walks past a room's door.
+ */
+interface CommitState {
+  /** Currently-emitted room id (may be OUTSIDE_ROOM_ID). */
+  committedRoom: string;
+  /** Pending new argmax, or null if no pending change. */
+  candidateRoom: string | null;
+  /** When the current candidate first became argmax (ms). */
+  candidateSince: number;
 }
 
 /**
@@ -91,6 +111,13 @@ export class BayesianLocator implements Locator {
   private posteriors: Map<string, Posterior> = new Map();
 
   /**
+   * Per-device committed-room state, tracked alongside posterior.
+   * Decouples "what room is the argmax right now" (transient) from
+   * "what room are we reporting" (dwell-filtered).
+   */
+  private commitStates: Map<string, CommitState> = new Map();
+
+  /**
    * Edge data (door position + width) keyed by sorted-pair edge key, e.g.
    * `"bedroom|living"`. Populated from `open_to` entries in `syncConfig`;
    * graph edges with no entry (e.g. `floor_area` cliques, door-less
@@ -106,6 +133,9 @@ export class BayesianLocator implements Locator {
     proximitySigmaM: 1.5,
     proximityFloor: 0.05,
     defaultDoorWidth: 0.8,
+    commitDwellMs: 2000,
+    commitMargin: 0.15,
+    blendThreshold: 0.05,
   };
 
   /**
@@ -146,9 +176,124 @@ export class BayesianLocator implements Locator {
     );
     this.posteriors.set(deviceId, posterior);
 
-    const topState = argmax(posterior);
-    const constrained = this.constrainToRoom(raw, topState);
-    return { ...constrained, algorithm: this.name };
+    // Apply committed-room hysteresis to the argmax — the *output* room
+    // only flips after the candidate has dwelt OR has decisively pulled
+    // ahead of the currently-committed room.
+    const committedRoom = this.updateCommit(deviceId, posterior);
+
+    // Posterior-weighted blended position — smoothly interpolates as
+    // the posterior shifts across a door boundary instead of snapping
+    // when the argmax flips.
+    const blended = this.blendedPosition(raw, posterior);
+
+    return {
+      ...raw,
+      x: blended.x,
+      y: blended.y,
+      algorithm: this.name,
+      roomId: committedRoom,
+    };
+  }
+
+  /**
+   * Update the per-device committed room based on the posterior's
+   * argmax. Implements two complementary gates:
+   *
+   *   1. Dwell: a new argmax must remain top for `commit_dwell_ms`
+   *      before it flips the committed room. Filters out brief
+   *      posterior spikes.
+   *   2. Margin: if the new argmax's probability exceeds the committed
+   *      room's probability by `commit_margin`, it flips immediately.
+   *      Lets genuine decisive transitions commit fast.
+   *
+   * Returns the committed room id (may be OUTSIDE_ROOM_ID).
+   */
+  private updateCommit(deviceId: string, posterior: Posterior): string {
+    const topRoom = argmax(posterior);
+    const now = Date.now();
+    const existing = this.commitStates.get(deviceId);
+
+    // First sighting — commit immediately to the initial argmax.
+    if (!existing) {
+      this.commitStates.set(deviceId, {
+        committedRoom: topRoom,
+        candidateRoom: null,
+        candidateSince: 0,
+      });
+      return topRoom;
+    }
+
+    // Argmax matches committed — no candidate to track.
+    if (topRoom === existing.committedRoom) {
+      existing.candidateRoom = null;
+      existing.candidateSince = 0;
+      return existing.committedRoom;
+    }
+
+    // Argmax differs from committed. Start or continue tracking a
+    // candidate, and check both commit gates.
+    if (existing.candidateRoom !== topRoom) {
+      existing.candidateRoom = topRoom;
+      existing.candidateSince = now;
+    }
+
+    const committedProb = posterior.get(existing.committedRoom) ?? 0;
+    const candidateProb = posterior.get(topRoom) ?? 0;
+    const marginMet =
+      candidateProb - committedProb >= this.tuning.commitMargin;
+    const dwellMet =
+      now - existing.candidateSince >= this.tuning.commitDwellMs;
+
+    if (marginMet || dwellMet) {
+      existing.committedRoom = topRoom;
+      existing.candidateRoom = null;
+      existing.candidateSince = 0;
+    }
+    return existing.committedRoom;
+  }
+
+  /**
+   * Posterior-weighted blended position. For each room whose posterior
+   * is above `blend_threshold`, project the raw observation into that
+   * room's polygon (or, for OUTSIDE, use raw as-is), then take the
+   * weighted average.
+   *
+   * In practice the posterior is dominated by one or two rooms, so the
+   * blend is almost always between adjacent rooms. As the posterior
+   * shifts across a door, the blended position slides continuously
+   * across the doorway instead of snapping when the argmax flips.
+   *
+   * Threshold filters out a long tail of tiny posteriors (≤ 5% each by
+   * default) that would otherwise drag the output toward distant rooms.
+   */
+  private blendedPosition(
+    raw: { x: number; y: number },
+    posterior: Posterior,
+  ): { x: number; y: number } {
+    let wx = 0;
+    let wy = 0;
+    let total = 0;
+    for (const [roomId, prob] of posterior) {
+      if (prob < this.tuning.blendThreshold) continue;
+      if (roomId === OUTSIDE_ROOM_ID) {
+        // No polygon for outside — contribute the raw position as-is.
+        wx += prob * raw.x;
+        wy += prob * raw.y;
+        total += prob;
+        continue;
+      }
+      const room = this.rooms.find((r) => r.id === roomId);
+      if (!room?.points) continue;
+      const inside = pointInPolygon([raw.x, raw.y], room.points);
+      const [px, py] = inside
+        ? [raw.x, raw.y]
+        : closestPointOnPolygon(raw.x, raw.y, room.points);
+      wx += prob * px;
+      wy += prob * py;
+      total += prob;
+    }
+    if (total <= 0) return { x: raw.x, y: raw.y };
+    return { x: wx / total, y: wy / total };
   }
 
   /** Clear all per-device posterior state. Currently unused externally. */
@@ -185,6 +330,9 @@ export class BayesianLocator implements Locator {
       proximitySigmaM: current.bayesian.proximity_sigma_m,
       proximityFloor: current.bayesian.proximity_floor,
       defaultDoorWidth: current.bayesian.default_door_width_m,
+      commitDwellMs: current.bayesian.commit_dwell_ms,
+      commitMargin: current.bayesian.commit_margin,
+      blendThreshold: current.bayesian.blend_threshold,
     };
 
     // Populate per-edge door/width data from every room's `open_to`. Edges
@@ -242,6 +390,7 @@ export class BayesianLocator implements Locator {
     // Topology changed — any old posteriors reference stale room ids.
     // Clearing them lets the next sighting re-seed cleanly.
     this.posteriors.clear();
+    this.commitStates.clear();
   }
 
   private forwardStep(
@@ -425,20 +574,6 @@ export class BayesianLocator implements Locator {
     return Math.exp(-d);
   }
 
-  /**
-   * If the raw position is outside the most-likely room's polygon, project
-   * it to the nearest point on the polygon boundary. Keeps the visible dot
-   * glued to legal interior geometry — the user never sees the Bayesian
-   * tracker "ghost through a wall."
-   */
-  private constrainToRoom(raw: LocatorResult, roomId: string): LocatorResult {
-    if (roomId === OUTSIDE_ROOM_ID) return raw;
-    const room = this.rooms.find((r) => r.id === roomId);
-    if (!room?.points) return raw;
-    if (pointInPolygon([raw.x, raw.y], room.points)) return raw;
-    const [px, py] = closestPointOnPolygon(raw.x, raw.y, room.points);
-    return { ...raw, x: px, y: py };
-  }
 }
 
 // ─── Geometry helpers ─────────────────────────────────────────────────────

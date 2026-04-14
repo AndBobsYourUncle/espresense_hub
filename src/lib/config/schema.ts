@@ -405,6 +405,31 @@ export const BayesianSchema = z
      * baseline transition weight through that door.
      */
     default_door_width_m: z.number().positive().default(0.8),
+    /**
+     * Committed-room hysteresis: when the posterior's argmax flips to a
+     * new room, how long (ms) must it remain the argmax before the
+     * *output* room flips? Prevents brief posterior spikes (e.g.
+     * walking past a room's door) from flashing as a "committed" room
+     * transition. Applied in addition to the posterior's own inertia.
+     * Default 2000 — tune down for more responsive, up for more stable.
+     */
+    commit_dwell_ms: z.number().int().min(0).default(2000),
+    /**
+     * Committed-room margin override: if the new argmax's posterior
+     * probability exceeds the currently-committed room's probability
+     * by at least this margin, the commit flips *immediately* — bypassing
+     * the dwell timer. Lets a genuine room transition commit fast when
+     * the evidence is decisive, while still gating ambiguous spikes.
+     * 0..1; default 0.15.
+     */
+    commit_margin: z.number().min(0).max(1).default(0.15),
+    /**
+     * Minimum per-room posterior probability to contribute to the
+     * posterior-weighted output position. Rooms below this threshold
+     * are dropped from the blend so a long tail of near-zero posteriors
+     * doesn't drag the visible position around. 0..1; default 0.05.
+     */
+    blend_threshold: z.number().min(0).max(1).default(0.05),
   })
   .prefault({});
 

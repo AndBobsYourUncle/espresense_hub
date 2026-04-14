@@ -939,6 +939,42 @@ function FilteringTab({ doc, setField }: DocProps) {
             unit="m"
           />
         </Field>
+        <Field
+          label="Commit dwell"
+          hint="Required dwell time (ms) for a new argmax to become the reported room. Filters out brief posterior spikes when walking past a room's door. Default 2000."
+        >
+          <NumberInput
+            value={get<number>(doc, ["bayesian", "commit_dwell_ms"], 2000)}
+            onChange={(v) => setField(["bayesian", "commit_dwell_ms"], v)}
+            step={100}
+            min={0}
+            unit="ms"
+          />
+        </Field>
+        <Field
+          label="Commit margin"
+          hint="If the candidate room's posterior exceeds the currently-committed room's posterior by this margin, commit flips immediately (bypassing the dwell). Lets decisive transitions commit fast. 0..1; default 0.15."
+        >
+          <NumberInput
+            value={get<number>(doc, ["bayesian", "commit_margin"], 0.15)}
+            onChange={(v) => setField(["bayesian", "commit_margin"], v)}
+            step={0.01}
+            min={0}
+            max={1}
+          />
+        </Field>
+        <Field
+          label="Blend threshold"
+          hint="Minimum posterior probability for a room to contribute to the blended output position. Rooms below this threshold are dropped from the blend so tiny posteriors don't drag the visible position. 0..1; default 0.05."
+        >
+          <NumberInput
+            value={get<number>(doc, ["bayesian", "blend_threshold"], 0.05)}
+            onChange={(v) => setField(["bayesian", "blend_threshold"], v)}
+            step={0.01}
+            min={0}
+            max={1}
+          />
+        </Field>
       </Section>
 
       <Section

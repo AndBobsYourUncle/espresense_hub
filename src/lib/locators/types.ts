@@ -25,6 +25,22 @@ export interface LocatorResult {
   fixes: number;
   /** Identifier of the algorithm that produced the result. */
   algorithm: string;
+  /**
+   * Optional explicit room assignment from locators that track room state
+   * (e.g. the Bayesian room tracker). Downstream consumers (presence
+   * publisher) use this when present instead of deriving the room from
+   * (x, y) via point-in-polygon.
+   *
+   * Convention:
+   *   - `undefined` — locator doesn't track rooms; caller should do
+   *     point-in-polygon on (x, y) as usual.
+   *   - `null` — locator explicitly says "not in any room" (between
+   *     polygons or on the floor's periphery).
+   *   - `"outside"` — the well-known outside state (imported as
+   *     `OUTSIDE_ROOM_ID` from the config schema).
+   *   - any other string — a specific room id.
+   */
+  roomId?: string | null;
 }
 
 /** Common locator interface — all algorithms accept a list of fixes. */

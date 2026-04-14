@@ -1,5 +1,5 @@
 import type { Config } from "@/lib/config";
-import type { PresenceZone } from "@/lib/config/schema";
+import { OUTSIDE_ROOM_ID, type PresenceZone } from "@/lib/config/schema";
 import { findRoom } from "@/lib/locators/room_aware";
 import { publishRaw } from "@/lib/mqtt/client";
 import { areAdjacent, getRoomGraph } from "./room_graph";
@@ -114,6 +114,63 @@ export function resolveLocation(
     floorId: floorFallback?.floorId ?? null,
     floorName: floorFallback?.floorName ?? null,
   };
+}
+
+/**
+ * Resolve a ResolvedLocation from a locator-provided roomId, used when a
+ * locator (like Bayesian) tracks room state explicitly and we want to
+ * trust its assignment rather than do point-in-polygon on a potentially
+ * blended/interpolated position.
+ *
+ *   - `roomId === undefined` → fall back to `resolveLocation(pos, config)`.
+ *     Locator didn't report a room; run the usual point-in-polygon path.
+ *   - `roomId === null` → explicit "not in any room". Room/roomName are
+ *     null; floor falls through to Z-range match if available.
+ *   - `roomId === OUTSIDE_ROOM_ID` → treated the same as null for HA
+ *     reporting (`defaultState` will fall through to the floor or
+ *     `not_home`). We don't publish a literal "outside" state string.
+ *   - any other string → resolved via config lookup to recover the
+ *     canonical room + floor metadata.
+ */
+function resolveLocationFromRoomId(
+  roomId: string | null | undefined,
+  pos: { x: number; y: number; z: number },
+  config: Config,
+): ResolvedLocation {
+  if (roomId === undefined) {
+    return resolveLocation(pos, config);
+  }
+  if (roomId === null || roomId === OUTSIDE_ROOM_ID) {
+    // Find the floor by Z-range so at least `floorName` is meaningful.
+    for (const floor of config.floors) {
+      if (floor.bounds) {
+        const [, [, , maxZ]] = floor.bounds;
+        const [[, , minZ]] = floor.bounds;
+        if (pos.z < minZ || pos.z > maxZ) continue;
+      }
+      return {
+        roomId: null,
+        roomName: null,
+        floorId: floor.id ?? null,
+        floorName: floor.name ?? null,
+      };
+    }
+    return { roomId: null, roomName: null, floorId: null, floorName: null };
+  }
+  // Specific room — look it up.
+  for (const floor of config.floors) {
+    const room = floor.rooms.find((r) => r.id === roomId);
+    if (room) {
+      return {
+        roomId: room.id ?? roomId,
+        roomName: room.name ?? room.id ?? roomId,
+        floorId: floor.id ?? null,
+        floorName: floor.name ?? null,
+      };
+    }
+  }
+  // Room id not in current config (stale after a reload?) — fall back.
+  return resolveLocation(pos, config);
 }
 
 /**
@@ -516,6 +573,12 @@ interface PositionSample {
   confidence: number;
   fixes: number;
   algorithm: string;
+  /**
+   * Optional locator-reported room id. Present when the locator tracks
+   * room state (BayesianLocator); absent for position-only locators.
+   * See `LocatorResult.roomId` for semantics.
+   */
+  roomId?: string | null;
 }
 
 export interface PresencePublishInput {
@@ -560,10 +623,20 @@ export async function publishPresence({
   // Smart tracker runs when the Bayesian locator is enabled and actually
   // produced a position this tick. Skipping hysteresis on bayesianLoc —
   // the Bayesian forward algorithm already provides heavy smoothing, and
-  // running the discrete room-hysteresis on top would just double-smooth.
+  // it applies its own committed-room dwell filter internally so the
+  // `roomId` we see here is already hysteresis-gated.
+  //
+  // If Bayesian populated `roomId`, we trust it as the authoritative
+  // room assignment and derive name/floor from config by lookup. That
+  // matters because the Bayesian position is now posterior-weighted
+  // across adjacent rooms, so point-in-polygon on the blended position
+  // may legitimately land in either room — only the committed roomId
+  // tells us which one the locator is actually reporting.
   const useBayesian = Boolean(bayesianPosition && config.bayesian.enabled);
   const bayesianLoc =
-    useBayesian && bayesianPosition ? resolveLocation(bayesianPosition, config) : null;
+    useBayesian && bayesianPosition
+      ? resolveLocationFromRoomId(bayesianPosition.roomId, bayesianPosition, config)
+      : null;
 
   // Zones auto-upgrade to the Bayesian room assignment when available —
   // there's never a reason to aggregate over the known-noisier signal.
