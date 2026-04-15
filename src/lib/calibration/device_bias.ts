@@ -1,4 +1,3 @@
-import { buildObstructionFn } from "@/lib/map/rf_cache";
 import type { DeviceGroundTruthPin, Store } from "@/lib/state/store";
 
 /**
@@ -26,31 +25,20 @@ import type { DeviceGroundTruthPin, Store } from "@/lib/state/store";
  * With multiple pins, we interpolate the bias field via inverse-
  * distance weighting over the device's current position estimate.
  *
- * **RF-aware geometric transfer**: the raw stored bias contains TWO
- * different effects mashed together — per-(device, node) intrinsics
- * (antenna gain, body shadow) that are spatially stable, plus
- * geometric attenuation along the pin-to-node path (walls, doors)
- * that varies with the device's actual position. Without separating
- * these, a pin in the bedroom teaches the system "this device looks
- * 1.6× too far from master_bathroom node" — but that includes a
- * wall the path went through. When the device walks to the living
- * room, the same 1.6× ratio gets applied even though the new path
- * doesn't traverse that wall, producing systematic over-correction.
- *
- * The fix: at lookup time, compute the structural attenuation W from
- * the RF map for both the pin position and the current estimate
- * position. The bias adjustment factor is:
- *
- *     adjusted_bias = stored_bias × 10^((W_est − W_pin) / (10·n_firmware))
- *
- * Net effect: the per-device intrinsic (antenna pattern, etc.) is
- * preserved, while the geometric portion is recomputed for the
- * device's current location. Pins now generalize across positions
- * instead of being hyper-local to where they were placed.
- *
- * Falls back to no-op transfer when the RF cache isn't available
- * (W=0 on both sides → adjustment = 1.0 → identical to pre-RF
- * behavior).
+ * **Known limitation**: the stored bias entangles per-device
+ * intrinsics (antenna gain, body shadow — spatially stable) with
+ * geometric attenuation along the pin-to-node path (walls, doors —
+ * varies with where the device actually is). A pin in the bedroom
+ * teaches "this device looks 1.6× too far from master_bathroom node"
+ * — but that includes a wall the path went through, so the same
+ * 1.6× ratio gets applied when the device walks to a wall-free
+ * position. Decomposing the geometric component using the RF map
+ * (`adjusted = stored × 10^((W_est−W_pin) / (10·n))`) was attempted
+ * and reverted: the dependency on the previous estimate (used to
+ * compute W_est) creates a positive feedback loop that destabilizes
+ * the locator near walls. A future iteration would compute W_est
+ * from a smoothed/inferred position (e.g. Bayesian's room
+ * posterior) rather than the raw locator output.
  */
 
 /** Result of looking up a node's bias for a device at a position. */
@@ -74,23 +62,28 @@ const BIAS_MAX = 5.0;
 const MIN_TRUE_DIST = 1.0;
 
 /**
- * Compute (device, node) → bias from a pin, transferred to the
- * device's current position estimate via the RF map. Prefers the
- * accumulated `nodeBias` stats when available (more samples → tighter
- * estimate); falls back to the single-snapshot `measurements` for
- * fresh pins.
+ * Compute (device, node) → bias from a pin. Prefers the accumulated
+ * `nodeBias` stats when available (more samples → tighter estimate);
+ * falls back to the single-snapshot `measurements` for fresh pins.
  *
- * `estimate` is the device's currently-believed position. The raw
- * bias from the pin is geometrically adjusted to account for the
- * difference in path attenuation between (pin → node) and
- * (estimate → node). When the RF cache isn't built, the adjustment
- * falls through as a no-op (identical to pre-RF-aware behavior).
+ * NOTE: an earlier version applied an RF-aware geometric transfer
+ * here — adjusting the stored bias to account for the difference in
+ * path attenuation between (pin → node) and (current_estimate →
+ * node). It introduced a positive feedback loop: the previous
+ * estimate determines W_est, W_est determines the bias, the bias
+ * determines the new estimate. Near walls (where W flips between
+ * sides), tiny estimate noise produced large bias swings and
+ * destabilized every locator. Reverted to static-per-pin bias.
+ *
+ * The RF-aware transfer idea is sound in principle but needs
+ * stabilization (e.g. compute W on a smoothed/averaged estimate or
+ * a Bayesian-inferred room rather than the raw locator output) before
+ * it can be safely re-applied. Tracked as a future improvement.
  */
 function biasFromPin(
   pin: DeviceGroundTruthPin,
   nodeId: string,
   store: Store,
-  estimate: readonly [number, number, number],
 ): { bias: number; trueDist: number; sampleCount: number } | null {
   const nodePoint = store.nodeIndex.get(nodeId);
   if (!nodePoint) return null;
@@ -100,62 +93,23 @@ function biasFromPin(
   const trueDist = Math.sqrt(dx * dx + dy * dy + dz * dz);
   if (trueDist < MIN_TRUE_DIST) return null;
 
-  // Compute the raw bias (no RF adjustment yet). Prefer accumulated
-  // stats when we have enough samples.
-  let rawBias: number | null = null;
-  let sampleCount = 0;
-
+  // Prefer accumulated stats when we have enough samples.
   const accumulated = pin.nodeBias.get(nodeId);
   if (accumulated && accumulated.sampleCount >= 5) {
     const mean = accumulated.sumBias / accumulated.sampleCount;
     if (Number.isFinite(mean) && mean >= BIAS_MIN && mean <= BIAS_MAX) {
-      rawBias = mean;
-      sampleCount = accumulated.sampleCount;
+      return { bias: mean, trueDist, sampleCount: accumulated.sampleCount };
     }
   }
-  if (rawBias == null) {
-    // Fall back to the snapshot from when the pin was placed.
-    const measured = pin.measurements.get(nodeId);
-    if (measured == null || measured <= 0) return null;
-    const bias = measured / trueDist;
-    if (!Number.isFinite(bias) || bias < BIAS_MIN || bias > BIAS_MAX) {
-      return null;
-    }
-    rawBias = bias;
-    sampleCount = 1;
-  }
 
-  // RF-aware geometric transfer: shift the bias from the pin's
-  // position to the estimate's position. See module-level comment
-  // for the derivation. Returns rawBias unchanged when the RF cache
-  // isn't ready or the node's firmware absorption is unreadable.
-  const obstructionFn = buildObstructionFn(nodeId, [
-    nodePoint[0],
-    nodePoint[1],
-  ]);
-  if (!obstructionFn) {
-    return { bias: rawBias, trueDist, sampleCount };
+  // Fall back to the snapshot from when the pin was placed.
+  const measured = pin.measurements.get(nodeId);
+  if (measured == null || measured <= 0) return null;
+  const bias = measured / trueDist;
+  if (!Number.isFinite(bias) || bias < BIAS_MIN || bias > BIAS_MAX) {
+    return null;
   }
-  const wPin = obstructionFn(pin.position[0], pin.position[1]);
-  const wEst = obstructionFn(estimate[0], estimate[1]);
-  // Pull current firmware absorption from the node's retained MQTT
-  // settings. Falls back to a sane default if the value is missing
-  // or unparseable — keeps the adjustment well-defined even on a
-  // freshly-deployed setup.
-  const absRaw = store.nodeSettings.get(nodeId)?.get("absorption");
-  const parsedAbs = absRaw != null ? parseFloat(absRaw) : NaN;
-  const nFirmware = Number.isFinite(parsedAbs) && parsedAbs > 0.1 ? parsedAbs : 2.7;
-  const adjustment = Math.pow(10, (wEst - wPin) / (10 * nFirmware));
-  const adjustedBias = rawBias * adjustment;
-
-  // Re-clamp post-adjustment. A pathological combination (huge wall
-  // delta + low absorption) could push the adjusted bias outside the
-  // physically plausible range; clamp rather than feed nonsense into
-  // the locator's distance-correction step.
-  if (adjustedBias < BIAS_MIN || adjustedBias > BIAS_MAX) {
-    return { bias: Math.max(BIAS_MIN, Math.min(BIAS_MAX, adjustedBias)), trueDist, sampleCount };
-  }
-  return { bias: adjustedBias, trueDist, sampleCount };
+  return { bias, trueDist, sampleCount: 1 };
 }
 
 /**
@@ -182,7 +136,7 @@ export function lookupBias(
   let totalWeight = 0;
 
   for (const pin of pins) {
-    const sample = biasFromPin(pin, nodeId, store, positionEstimate);
+    const sample = biasFromPin(pin, nodeId, store);
     if (!sample) continue;
 
     // IDW weight: gaussian falloff from pin to current estimate.
