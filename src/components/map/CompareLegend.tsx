@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { DevicePositionsResponse } from "@/app/api/devices/positions/route";
+import { useMemo, useState } from "react";
 import { useUnits } from "@/components/UnitsProvider";
 import { formatDistanceDisplay } from "@/lib/units";
 import { LOCATOR_COLORS, LOCATOR_LABELS } from "./locatorColors";
 import { useMapTool } from "./MapToolProvider";
+import { useDevicePositionsStream } from "./useDevicePositionsStream";
 
 /**
  * Locators promoted to "primary" in the compare view — always shown by
@@ -218,85 +218,73 @@ interface LiveData {
 }
 
 /**
- * Poll positions, return the set of locators with live data plus
- * cross-device aggregated mean deltas and room-disagreement rates
- * (sample-weighted) and total sample counts. Polls only while compare
- * mode is on.
+ * Subscribe to the SSE stream and recompute cross-device aggregates
+ * (sample-weighted mean deltas, room-disagreement rates, sample
+ * counts) on every device update. Active only while compare mode is on.
+ *
+ * The aggregation is the same as the previous polling version — sums
+ * sample×metric per algorithm across devices, then divides by total
+ * samples — but it now updates as soon as the server emits, so the
+ * stat numbers in the legend tick in near-real-time instead of every
+ * 5 s.
  */
 function useLiveLocatorData(enabled: boolean): LiveData {
-  const [data, setData] = useState<LiveData>({
-    liveKeys: new Set(),
-    deltas: new Map(),
-    disagreeRates: new Map(),
-    insideOutsideRates: new Map(),
-    sampleCounts: new Map(),
-  });
+  // The stream is shared with DeviceMarkers via React's effect-tree —
+  // a fresh EventSource opens here per CompareLegend mount. Two open
+  // streams per page is fine; the server-side cost is one event-loop
+  // listener per connection.
+  const { devices } = useDevicePositionsStream();
 
-  useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const res = await fetch("/api/devices/positions", { cache: "no-store" });
-        if (!res.ok || cancelled) return;
-        const j = (await res.json()) as DevicePositionsResponse;
-        const liveKeys = new Set<string>();
-        // Sum up sample×(mean|disagreeRate) and total samples per
-        // algorithm so the displayed values are sample-weighted across
-        // all devices.
-        const deltaSums = new Map<string, number>();
-        const disagreeSums = new Map<string, number>();
-        const inOutSums = new Map<string, number>();
-        const counts = new Map<string, number>();
-        for (const d of j.devices) {
-          if (d.alternatives) {
-            for (const alt of d.alternatives) liveKeys.add(alt.algorithm);
-          }
-          if (d.upstreamPosition) liveKeys.add("upstream_companion");
-          if (d.locatorDeltas) {
-            for (const [algo, s] of Object.entries(d.locatorDeltas)) {
-              deltaSums.set(algo, (deltaSums.get(algo) ?? 0) + s.mean * s.count);
-              disagreeSums.set(
-                algo,
-                (disagreeSums.get(algo) ?? 0) + (s.disagreeRate ?? 0) * s.count,
-              );
-              inOutSums.set(
-                algo,
-                (inOutSums.get(algo) ?? 0) + (s.insideOutsideRate ?? 0) * s.count,
-              );
-              counts.set(algo, (counts.get(algo) ?? 0) + s.count);
-            }
-          }
-        }
-        const deltas = new Map<string, number>();
-        const disagreeRates = new Map<string, number>();
-        const insideOutsideRates = new Map<string, number>();
-        for (const [algo, total] of counts) {
-          if (total <= 0) continue;
-          deltas.set(algo, (deltaSums.get(algo) ?? 0) / total);
-          disagreeRates.set(algo, (disagreeSums.get(algo) ?? 0) / total);
-          insideOutsideRates.set(algo, (inOutSums.get(algo) ?? 0) / total);
-        }
-        if (!cancelled) {
-          setData({
-            liveKeys,
-            deltas,
-            disagreeRates,
-            insideOutsideRates,
-            sampleCounts: counts,
-          });
-        }
-      } catch {
-        // best-effort
+  return useMemo<LiveData>(() => {
+    if (!enabled) {
+      return {
+        liveKeys: new Set(),
+        deltas: new Map(),
+        disagreeRates: new Map(),
+        insideOutsideRates: new Map(),
+        sampleCounts: new Map(),
+      };
+    }
+    const liveKeys = new Set<string>();
+    const deltaSums = new Map<string, number>();
+    const disagreeSums = new Map<string, number>();
+    const inOutSums = new Map<string, number>();
+    const counts = new Map<string, number>();
+    for (const d of devices) {
+      if (d.alternatives) {
+        for (const alt of d.alternatives) liveKeys.add(alt.algorithm);
       }
+      if (d.upstreamPosition) liveKeys.add("upstream_companion");
+      if (d.locatorDeltas) {
+        for (const [algo, s] of Object.entries(d.locatorDeltas)) {
+          deltaSums.set(algo, (deltaSums.get(algo) ?? 0) + s.mean * s.count);
+          disagreeSums.set(
+            algo,
+            (disagreeSums.get(algo) ?? 0) + (s.disagreeRate ?? 0) * s.count,
+          );
+          inOutSums.set(
+            algo,
+            (inOutSums.get(algo) ?? 0) + (s.insideOutsideRate ?? 0) * s.count,
+          );
+          counts.set(algo, (counts.get(algo) ?? 0) + s.count);
+        }
+      }
+    }
+    const deltas = new Map<string, number>();
+    const disagreeRates = new Map<string, number>();
+    const insideOutsideRates = new Map<string, number>();
+    for (const [algo, total] of counts) {
+      if (total <= 0) continue;
+      deltas.set(algo, (deltaSums.get(algo) ?? 0) / total);
+      disagreeRates.set(algo, (disagreeSums.get(algo) ?? 0) / total);
+      insideOutsideRates.set(algo, (inOutSums.get(algo) ?? 0) / total);
+    }
+    return {
+      liveKeys,
+      deltas,
+      disagreeRates,
+      insideOutsideRates,
+      sampleCounts: counts,
     };
-    tick();
-    const id = setInterval(tick, 5_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [enabled]);
-
-  return data;
+  }, [enabled, devices]);
 }

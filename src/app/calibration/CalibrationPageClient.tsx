@@ -4,6 +4,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -30,6 +31,7 @@ import type {
 import type { AutofitResponse } from "@/app/api/calibration/autofit/route";
 import type { ApplyResponse } from "@/app/api/calibration/apply/route";
 import type { RfFitResponse } from "@/app/api/calibration/rf_fit/route";
+import { useDevicePositionsStream } from "@/components/map/useDevicePositionsStream";
 import type { AutoApplyAuditResponse } from "@/app/api/calibration/audit/route";
 import type { DevicePositionsResponse } from "@/app/api/devices/positions/route";
 import type { NodeFit, NodePairFit } from "@/lib/calibration/autofit";
@@ -1158,37 +1160,22 @@ function RfFitPanel() {
  * Cross-locator comparison panel. Shows running mean distance from
  * each non-active locator's output to ours, persisted across restarts.
  * Aggregates across all devices for the headline number; expands per-
- * device for diagnostic drill-down. Polls /api/devices/positions every
- * 5 s for fresh stats.
+ * device for diagnostic drill-down. Subscribes to the SSE stream so
+ * stats tick continuously instead of waiting for the next poll.
  */
 function LocatorComparisonPanel() {
   const { units } = useUnits();
-  const [data, setData] = useState<DevicePositionsResponse | null>(null);
+  const { devices } = useDevicePositionsStream();
   const [expanded, setExpanded] = useState(false);
   const [openDevice, setOpenDevice] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const res = await fetch("/api/devices/positions", {
-          cache: "no-store",
-        });
-        if (!res.ok || cancelled) return;
-        const json = (await res.json()) as DevicePositionsResponse;
-        if (!cancelled) setData(json);
-      } catch {
-        // best-effort
-      }
-    };
-    tick();
-    const id = setInterval(tick, 5_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
-
+  // Adapt the streamed devices array into the shape useAggregates
+  // expects (which originated from the polling endpoint's response).
+  // serverTime is unused downstream — Date.now() is good enough.
+  const data: DevicePositionsResponse = useMemo(
+    () => ({ devices, serverTime: Date.now() }),
+    [devices],
+  );
   const aggregates = useAggregates(data);
   if (!data) return null;
   const totalSamples = aggregates.reduce((s, a) => s + a.count, 0);

@@ -3,6 +3,7 @@ import type {
   NodeTelemetry,
   NormalizedMeasurement,
 } from "@/lib/mqtt/messages";
+import { emitPositionChange } from "./events";
 import { kalmanStep } from "./kalman";
 import { smoothMeasurementDistance } from "./measurement_smoothing";
 import { smoothDevicePosition } from "./smoothing";
@@ -522,6 +523,11 @@ export class Store {
       // diagnosing whether smoothing is responsible for an artifact.
       d.position = position;
     }
+    // Notify SSE subscribers that this device's state may have
+    // changed. They debounce per-tick, so the recordLocatorComparison
+    // calls that synchronously follow this in the handler will land
+    // before the SSE message is actually sent.
+    emitPositionChange(deviceId);
   }
 
   /**
@@ -552,6 +558,7 @@ export class Store {
     // MQTT handler (not here) so it has config/rooms in scope to compute
     // room and inside/outside disagreement flags properly. This layer
     // stays pure-data.
+    emitPositionChange(deviceId);
   }
 
   /**

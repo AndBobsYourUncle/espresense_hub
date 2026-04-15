@@ -187,8 +187,9 @@ export default function FloorPlan({ config, floor }: Props) {
       {/* Configured nodes — clickable for ruler measurements */}
       <NodeMarkers nodes={floorNodes} transform={transform} />
 
-      {/* Live device markers — client component, polls /api/devices/positions
-          and re-renders as positions update. */}
+      {/* Live device markers — client component, subscribes to the SSE
+          stream at /api/devices/positions/stream and re-renders on
+          every server-side position update. */}
       <DeviceMarkers
         transform={transform}
         staleAfterMs={config.timeout * 1000}

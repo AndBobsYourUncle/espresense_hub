@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getStore } from "@/lib/state/store";
+import { getStore, type DeviceState } from "@/lib/state/store";
 
 export const dynamic = "force-dynamic";
 
@@ -84,62 +84,73 @@ export interface DevicePositionsResponse {
   serverTime: number;
 }
 
+/**
+ * Build a DTO from a single DeviceState. Exported so the SSE endpoint
+ * can reuse the exact same shape as the polling endpoint without
+ * duplicating the field-mapping logic. Returns null when the device
+ * has no position to report (caller should skip it).
+ */
+export function buildDevicePositionDTO(d: DeviceState): DevicePositionDTO | null {
+  if (!d.position) return null;
+  return {
+    id: d.id,
+    name: d.name,
+    x: d.position.x,
+    y: d.position.y,
+    z: d.position.z,
+    confidence: d.position.confidence,
+    fixes: d.position.fixes,
+    algorithm: d.position.algorithm,
+    lastSeen: d.lastSeen,
+    computedAt: d.position.computedAt,
+    alternatives: d.position.alternatives,
+    rawPosition: d.position.rawPosition,
+    upstreamPosition: d.upstreamPosition
+      ? {
+          x: d.upstreamPosition.x,
+          y: d.upstreamPosition.y,
+          z: d.upstreamPosition.z,
+          confidence: d.upstreamPosition.confidence,
+          fixes: d.upstreamPosition.fixes,
+          scenario: d.upstreamPosition.scenario,
+          lastSeen: d.upstreamPosition.lastSeen,
+        }
+      : undefined,
+    locatorDeltas: d.locatorComparisons
+      ? Object.fromEntries(
+          [...d.locatorComparisons.entries()].map(([algo, s]) => {
+            const mean = s.count > 0 ? s.sum / s.count : 0;
+            const variance =
+              s.count > 0 ? Math.max(0, s.sumSq / s.count - mean * mean) : 0;
+            // 0..1 — fraction of samples where this locator put the
+            // device in a different room than the active locator.
+            const disagreeRate =
+              s.count > 0 ? s.roomDisagreeCount / s.count : 0;
+            const insideOutsideRate =
+              s.count > 0 ? s.insideOutsideDisagreeCount / s.count : 0;
+            return [
+              algo,
+              {
+                mean,
+                stddev: Math.sqrt(variance),
+                count: Math.round(s.count),
+                disagreeRate,
+                insideOutsideRate,
+                lastUpdatedMs: s.lastUpdatedMs,
+              },
+            ];
+          }),
+        )
+      : undefined,
+  };
+}
+
 export function GET() {
   const store = getStore();
   const devices: DevicePositionDTO[] = [];
   for (const d of store.devices.values()) {
-    if (!d.position) continue;
-    devices.push({
-      id: d.id,
-      name: d.name,
-      x: d.position.x,
-      y: d.position.y,
-      z: d.position.z,
-      confidence: d.position.confidence,
-      fixes: d.position.fixes,
-      algorithm: d.position.algorithm,
-      lastSeen: d.lastSeen,
-      computedAt: d.position.computedAt,
-      alternatives: d.position.alternatives,
-      rawPosition: d.position.rawPosition,
-      upstreamPosition: d.upstreamPosition
-        ? {
-            x: d.upstreamPosition.x,
-            y: d.upstreamPosition.y,
-            z: d.upstreamPosition.z,
-            confidence: d.upstreamPosition.confidence,
-            fixes: d.upstreamPosition.fixes,
-            scenario: d.upstreamPosition.scenario,
-            lastSeen: d.upstreamPosition.lastSeen,
-          }
-        : undefined,
-      locatorDeltas: d.locatorComparisons
-        ? Object.fromEntries(
-            [...d.locatorComparisons.entries()].map(([algo, s]) => {
-              const mean = s.count > 0 ? s.sum / s.count : 0;
-              const variance =
-                s.count > 0 ? Math.max(0, s.sumSq / s.count - mean * mean) : 0;
-              // 0..1 — fraction of samples where this locator put the
-              // device in a different room than the active locator.
-              const disagreeRate =
-                s.count > 0 ? s.roomDisagreeCount / s.count : 0;
-              const insideOutsideRate =
-                s.count > 0 ? s.insideOutsideDisagreeCount / s.count : 0;
-              return [
-                algo,
-                {
-                  mean,
-                  stddev: Math.sqrt(variance),
-                  count: Math.round(s.count),
-                  disagreeRate,
-                  insideOutsideRate,
-                  lastUpdatedMs: s.lastUpdatedMs,
-                },
-              ];
-            }),
-          )
-        : undefined,
-    });
+    const dto = buildDevicePositionDTO(d);
+    if (dto) devices.push(dto);
   }
   const body: DevicePositionsResponse = {
     devices,

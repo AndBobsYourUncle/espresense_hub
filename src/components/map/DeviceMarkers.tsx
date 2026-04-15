@@ -1,91 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import type { FloorTransform } from "@/lib/map/geometry";
 import { tx, ty } from "@/lib/map/geometry";
-import type {
-  DevicePositionDTO,
-  DevicePositionsResponse,
-} from "@/app/api/devices/positions/route";
 import { useDeviceSelection } from "./DeviceSelectionProvider";
 import { colorForLocator } from "./locatorColors";
 import { useMapTool } from "./MapToolProvider";
+import { useDevicePositionsStream } from "./useDevicePositionsStream";
 
 interface Props {
   transform: FloorTransform;
   /** Stale-after in milliseconds — devices older than this are hidden. */
   staleAfterMs: number;
-  /** Polling interval in milliseconds. */
-  pollMs?: number;
-}
-
-/**
- * Returns the latest device positions plus a `snapping` flag that's
- * true for one render whenever the tab just regained visibility.
- *
- * The flag is consumed by the marker's `data-snapping` attribute, which
- * pairs with a CSS rule that suppresses the normal transform transition
- * for that one frame. Without it, refocusing the tab after it's been
- * hidden for a while produces a long visible slide across the map as
- * the marker animates from its stale position to the freshly-fetched
- * one — distracting because the device didn't actually move smoothly,
- * we just missed seeing it move.
- */
-function useDevicePositions(pollMs: number): {
-  devices: DevicePositionDTO[];
-  snapping: boolean;
-} {
-  const [devices, setDevices] = useState<DevicePositionDTO[]>([]);
-  const [snapping, setSnapping] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const fetchOnce = async () => {
-      try {
-        const res = await fetch("/api/devices/positions", {
-          cache: "no-store",
-        });
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as DevicePositionsResponse;
-        if (!cancelled) setDevices(data.devices);
-      } catch {
-        // swallow — next tick will retry
-      }
-    };
-
-    fetchOnce();
-    const id = setInterval(fetchOnce, pollMs);
-
-    // Tab refocus: refetch immediately AND set the snapping flag so the
-    // catch-up render doesn't animate. A double rAF re-enables the
-    // transition after the new transform has been committed to the DOM,
-    // so subsequent updates get the normal smooth slide.
-    const onVisibility = () => {
-      if (document.visibilityState !== "visible") return;
-      setSnapping(true);
-      fetchOnce();
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => setSnapping(false));
-      });
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [pollMs]);
-
-  return { devices, snapping };
 }
 
 export default function DeviceMarkers({
   transform,
   staleAfterMs,
-  pollMs = 1000,
 }: Props) {
-  const { devices, snapping } = useDevicePositions(pollMs);
+  const { devices, snapping } = useDevicePositionsStream();
   const { selectedId, select } = useDeviceSelection();
   const { compareMode, setInspectedNodeId, hiddenLocators } = useMapTool();
   const now = Date.now();
