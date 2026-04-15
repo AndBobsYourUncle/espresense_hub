@@ -116,11 +116,39 @@ const CLOSEST_PRIOR_MAX_DIST_M = 6;
 const REL_TOL = 0.15;
 
 /**
- * Huber loss inflection point in the post-seed trilateration step.
- * Residuals below this contribute quadratically (precise fit where
- * data agrees), residuals above flatten to linear (one wild outlier
- * can't dominate). Same value the standalone Nelder-Mead locator uses.
+ * Asymmetric loss inflection point in the post-seed trilateration
+ * step (replaces the symmetric Huber from earlier iterations).
+ *
+ * Why asymmetric: BLE distance measurements are nearly always
+ * upper-bound estimates of the true device-to-node distance — path
+ * loss, walls, body shadow, and clutter all *add* attenuation
+ * (making the device look further than it is); essentially nothing
+ * makes the firmware's distance shorter than reality. So the
+ * residual `r = calc(p) − measured` has a meaningful sign:
+ *
+ *   r > 0  (calc > measured): the candidate position is FARTHER
+ *          from the node than the measurement says. The
+ *          measurement is approximately an upper bound, so this
+ *          violates physics — the candidate should not be there.
+ *          Heavy quadratic penalty.
+ *
+ *   r < 0  (calc < measured): the candidate is CLOSER than the
+ *          measured distance. Exactly what we expect for any path
+ *          with any obstruction. Light penalty.
+ *
+ * The asymmetric weighting steers the optimizer into the
+ * intersection of the disks centered at each node (radius =
+ * measured distance) — and the intersection of disks always
+ * contains the true position. Naturally keeps the position inside
+ * the building without any geometric patches.
+ *
+ * This is the principled answer to "trilateration converges
+ * outside the building": the symmetric Huber treats overshoot and
+ * undershoot equally, even though overshoot is the only physical
+ * possibility. Asymmetric loss aligns the math with the physics.
  */
+const ASYM_OVER_WEIGHT = 1.0;
+const ASYM_UNDER_WEIGHT = 0.1;
 const HUBER_DELTA = 1.5;
 
 export class RfRoomAwareLocator implements Locator {
@@ -330,12 +358,26 @@ export class RfRoomAwareLocator implements Locator {
     const seedX = scored[bestSeedIdx].cx;
     const seedY = scored[bestSeedIdx].cy;
 
-    // NM with the standard weighted Huber objective. Same form as the
-    // standalone NelderMeadLocator — minimize Σ w_i · ρ(||p − node_i||
-    // − d_i) with w_i = 1/d_i² and ρ a Huber. We don't apply RF
-    // weighting inside the objective: the seed is already room-
-    // correct, and NM should converge locally to the geometric
-    // minimum without straying.
+    // NM with an asymmetric weighted Huber objective. Σ w_i · ρ(r_i)
+    // where r_i = ||p − node_i|| − measured_i and ρ is the asymmetric
+    // Huber: full weight when r > 0 (candidate is farther from node
+    // than measured, which violates the upper-bound physics of BLE
+    // distance), 10% weight when r < 0 (candidate is closer than
+    // measured, which is the expected direction of measurement
+    // overshoot — perfectly fine, no need to penalize).
+    //
+    // The standard 1/d² weighting still applies (closer measurements
+    // are more reliable than far ones). Huber linearization above
+    // delta=1.5m keeps a single wild outlier from dominating.
+    //
+    // This is the principled fix for "trilateration converges
+    // outside the building." Symmetric loss treats `calc > measured`
+    // and `calc < measured` equally, but only the latter is
+    // physically possible — every BLE measurement overestimates true
+    // distance by some amount. Asymmetric loss aligns the math with
+    // the physics; the optimum naturally sits inside the
+    // intersection of the disks (radius = measured) which always
+    // contains the device. No outside-room patch needed.
     const objective = (p: [number, number]): number => {
       let sum = 0;
       for (const f of fixes) {
@@ -348,7 +390,8 @@ export class RfRoomAwareLocator implements Locator {
           absR <= HUBER_DELTA
             ? 0.5 * r * r
             : HUBER_DELTA * (absR - 0.5 * HUBER_DELTA);
-        const w = 1 / (f.distance * f.distance + 1e-6);
+        const dirWeight = r > 0 ? ASYM_OVER_WEIGHT : ASYM_UNDER_WEIGHT;
+        const w = (1 / (f.distance * f.distance + 1e-6)) * dirWeight;
         sum += w * lossR;
       }
       return sum;
