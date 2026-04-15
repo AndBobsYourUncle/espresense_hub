@@ -11,6 +11,7 @@ import { NearestNodeLocator } from "./nearest_node";
 import { NelderMeadLocator } from "./nelder_mead";
 import { OutlierRejectingLocator } from "./outlier";
 import { PathAwareLocator } from "./path_aware";
+import { RfPhysicsLocator } from "./rf_physics";
 import { RfRoomAwareLocator } from "./rf_room_aware";
 import { RoomAwareLocator } from "./room_aware";
 import type { Locator, LocatorResult, NodeFix } from "./types";
@@ -113,6 +114,17 @@ export function buildLocator(config: Config): LocatorBundle {
     new RfRoomAwareLocator(allRooms, config.nodes),
   );
 
+  // Pure physics-driven locator. Same circle-overlap / closest-node
+  // prior seed selection as RfRoomAware, but uses an RF-aware
+  // dB-space objective in NM (predicted RSSI vs firmware-implied
+  // RSSI) instead of distance-space trilateration. The configured
+  // walls/doors/path-loss directly determine which positions are
+  // physically plausible. More aggressive use of the RF model;
+  // brittler if the model is wrong, but worth comparing side-by-side.
+  const rfPhysics = new OutlierRejectingLocator(
+    new RfPhysicsLocator(allRooms, config.nodes),
+  );
+
   const allBases: Locator[] = [
     idw,
     nm,
@@ -122,6 +134,7 @@ export function buildLocator(config: Config): LocatorBundle {
     pathAware,
     envAware,
     rfRoomAware,
+    rfPhysics,
   ];
   if (config.bayesian.enabled) {
     allBases.push(new BayesianLocator(roomAware));

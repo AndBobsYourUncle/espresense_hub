@@ -15,6 +15,7 @@ export const LOCATOR_COLORS: Record<string, string> = {
   path_aware: "#f87171", // red-400 — fit-driven distance correction
   environment_aware: "#2dd4bf", // teal-400 — forward-model BFGS
   rf_room_aware: "#84cc16", // lime-500 — RF-weighted topology
+  rf_physics: "#ec4899", // pink-500 — physics-driven (dB-space objective)
   upstream_companion: "#64748b", // slate-500 — neutral, signals "external reference"
 };
 
@@ -29,6 +30,7 @@ export const LOCATOR_LABELS: Record<string, string> = {
   path_aware: "Path-Aware",
   environment_aware: "Env-Aware",
   rf_room_aware: "RF Room-Aware",
+  rf_physics: "RF Physics",
   upstream_companion: "ESP-Companion",
 };
 

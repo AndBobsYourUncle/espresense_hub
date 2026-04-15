@@ -58,6 +58,16 @@ export function rebuildRfCache(config: Config): void {
 }
 
 /**
+ * Read the current RF model parameters (or null when the cache isn't
+ * built yet). Locators that minimize an RF-physics objective need
+ * direct access to the path-loss exponent and reference RSSI to
+ * predict expected measurements at a candidate position.
+ */
+export function getRfParams(): RfParams | null {
+  return cache?.params ?? null;
+}
+
+/**
  * Build a closure that returns dB obstruction loss from `node` (acting
  * as the source for the wall-at-source side test) to an arbitrary
  * (px, py) target. Use this when scoring many candidate positions
