@@ -15,33 +15,34 @@ import type { Locator, LocatorResult, NodeFix } from "./types";
  *
  * Two RF-map-driven changes from RfRoomAware:
  *
- *   1. **Measurement correction**: each firmware-reported distance
+ *   1. **RF-informed outlier rejection**. After picking the seed
+ *      via RF-coherence scoring + closest-node room prior, evaluate
+ *      every fix's expected measured distance at the seed using the
+ *      RF model. Drop fixes whose actual measurement is wildly
+ *      below the model's prediction (default <70%). These are
+ *      almost always long-path undershoots — fixes from far nodes
+ *      whose firmware reports too-short distance because the
+ *      absorption setting is calibrated for shorter cluttered
+ *      paths. Including them in NM pulls position toward the wrong
+ *      area; dropping them lets local clean-path fixes dominate.
+ *
+ *   2. **Measurement correction**: each kept fix's measured distance
  *      is divided by `10^(W / (10·a_n))` to strip the model-predicted
- *      wall loss before trilateration. For paths the RF map captures
- *      correctly, the corrected distance is approximately the true
- *      geometric distance.
+ *      wall loss. For paths the RF map captures correctly, the
+ *      corrected distance is approximately the true geometric
+ *      distance.
  *
- *   2. **Per-fix RF reliability weighting**: each fix's contribution
- *      to the NM objective is weighted by `exp(-W / 2 dB)`. Far or
- *      wall-heavy fixes effectively drop out of the optimization.
- *      Mirrors RoomAware's hard cross-room weight cut, but
- *      continuous and tied to actual attenuation rather than binary
- *      topology.
+ * Why outlier rejection rather than continuous per-fix weighting:
+ * an earlier iteration applied `exp(-W / scale)` per-fix inside the
+ * NM objective. That created a non-smooth landscape (W changes per
+ * candidate position → weights change per candidate → multiple
+ * sharp local minima → NM result jumps between them across MQTT
+ * frames). Outlier rejection happens once at the seed, after which
+ * the NM objective uses uniform weighting on the kept set — stable
+ * and well-behaved.
  *
- * The motivating problem: in real BLE deployments, *long-distance
- * fixes systematically undershoot* — firmware absorption is tuned for
- * short cluttered paths, so for long open paths it over-attenuates
- * and reports distances much shorter than reality. The asymmetric
- * loss in RfRoomAware (which assumes overshoot is the typical
- * direction) then pulls position toward those wrong far-fix
- * measurements.
- *
- * Per-fix RF reliability weighting downweights those problematic
- * long fixes, letting nearby clean-path fixes dominate. The
- * measurement correction further refines what's left.
- *
- * Falls back to RfRoomAware-equivalent behavior (no measurement
- * adjustment, uniform per-fix weight) when the RF cache isn't built.
+ * Falls back to RfRoomAware-equivalent behavior (no rejection or
+ * adjustment) when the RF cache isn't built.
  */
 
 /**
@@ -52,26 +53,40 @@ import type { Locator, LocatorResult, NodeFix } from "./types";
 const RF_WEIGHT_SCALE_DB = 4;
 
 /**
- * Scale (in dB) for per-fix reliability weighting inside the NM
- * objective. Sharper than the candidate-scoring scale because we
- * want fixes from far/walled paths to effectively drop out of the
- * fit — these measurements are noisy enough (multipath, body shadow,
- * firmware-absorption mismatch over long paths) that they actively
- * mislead the optimizer when included with non-trivial weight.
+ * Outlier-rejection threshold: a fix is dropped from the NM input if
+ * its measured distance is less than this fraction of what the RF
+ * model predicts at the seed position. Catches the dominant failure
+ * mode where long-distance fixes systematically undershoot (firmware
+ * absorption is calibrated for short cluttered paths, so long-path
+ * RSSI reports as too-short distance). Those wrong measurements
+ * fundamentally mislead the optimizer about geometry.
  *
- *   W (dB)    weight
- *   ─────────────────
- *   0         1.00     (open path, fully trusted)
- *   2         0.37     (one open doorway, half-trusted)
- *   4         0.14     (one drywall, mostly ignored)
- *   6         0.05     (two walls, near-zero)
- *   8         0.018    (heavy obstruction, dropped)
- *
- * Effectively a continuous "drop fixes whose paths the model says
- * are unreliable" — the analogue of RoomAware's hard ternary cut for
- * cross-room measurements, but graded by actual attenuation.
+ * 0.7 = "drop fixes whose measured distance is less than 70% of
+ * what the model says it should be." For typical BLE noise, valid
+ * fixes overshoot by 10–60% (ratio 1.1–1.6 of true); they never
+ * undershoot by more than a few percent unless something is wrong
+ * with the path. Cutting at 0.7 keeps borderline cases and rejects
+ * the genuinely-broken ones.
  */
-const RF_FIX_RELIABILITY_SCALE_DB = 2;
+const OUTLIER_UNDERSHOOT_RATIO = 0.7;
+
+/**
+ * Always keep fixes whose RF-model-predicted distance is below this
+ * threshold. Short-range measurements are dominated by reference-
+ * RSSI calibration (not path-loss), so the undershoot rejection
+ * doesn't apply meaningfully. Ensures we always trust the closest
+ * 2–3 nodes regardless of model agreement.
+ */
+const ALWAYS_TRUST_SHORT_M = 5.0;
+
+/**
+ * Minimum number of fixes the NM step needs to operate. If outlier
+ * rejection would drop us below this, keep the top-N by predicted
+ * agreement (smallest residual magnitude at seed) instead. Avoids
+ * the degenerate case where a misleading seed rejects too many
+ * fixes and NM then has nothing to work with.
+ */
+const MIN_KEPT_FIXES = 4;
 
 /** Score concentration power for seed selection (winner takes most). */
 const SCORE_CONCENTRATION_POWER = 4;
@@ -280,65 +295,6 @@ export class RfPhysicsLocator implements Locator {
     }
     if (scored.length === 0) return fallbackIDW(fixes, this.name);
 
-    // Distance-space NM with RF-corrected measurements AND per-fix
-    // RF reliability weighting. For each fix:
-    //
-    //   measured_adjusted = measured / 10^(W(p, node) / (10·a_n))
-    //   r                 = calc - measured_adjusted
-    //   reliability       = exp(-W(p, node) / RF_FIX_RELIABILITY_SCALE_DB)
-    //
-    // then minimize Σ (1/d²) · reliability · ρ_asym(r).
-    //
-    // The reliability factor is the new ingredient. Far/walled fixes
-    // (high W from the candidate) get exponentially down-weighted,
-    // mirroring what RoomAware achieves with its hard cross-room
-    // weight cut — except continuously and tied to the actual RF map
-    // rather than binary topology. The sharper scale (2 dB vs 4 for
-    // pair scoring) makes it aggressive enough that high-W fixes
-    // effectively drop out: at W≥6 dB their contribution is <5%.
-    //
-    // Why this matters: long-path measurements undershoot
-    // systematically (firmware absorption is calibrated for short
-    // cluttered paths, so it over-attenuates the long ones and
-    // reports too-short distances). Without per-fix RF weighting,
-    // those wrong measurements pull the optimizer in the wrong
-    // direction. With it, they're effectively ignored and the
-    // optimizer focuses on local clean fixes.
-    //
-    // W is recomputed at every NM step because it depends on the
-    // candidate position — that's the point, the RF map participates
-    // in the objective throughout the optimization.
-    const objective = (p: [number, number]): number => {
-      let sum = 0;
-      for (const f of fixes) {
-        const dx = p[0] - f.point[0];
-        const dy = p[1] - f.point[1];
-        const calc = Math.sqrt(dx * dx + dy * dy);
-        if (calc < 0.1) continue;
-
-        const W = rfActive ? wAt(f.nodeId, p[0], p[1]) : 0;
-        const aN = absFor(f.nodeId);
-
-        const measuredAdjusted =
-          f.distance / Math.pow(10, W / (10 * aN));
-
-        const r = calc - measuredAdjusted;
-        const absR = Math.abs(r);
-        const lossR =
-          absR <= HUBER_DELTA
-            ? 0.5 * r * r
-            : HUBER_DELTA * (absR - 0.5 * HUBER_DELTA);
-
-        const dirWeight = r > 0 ? ASYM_OVER_WEIGHT : ASYM_UNDER_WEIGHT;
-        const baseW = 1 / (f.distance * f.distance + 1e-6);
-        const reliability = rfActive
-          ? Math.exp(-W / RF_FIX_RELIABILITY_SCALE_DB)
-          : 1;
-        sum += baseW * reliability * dirWeight * lossR;
-      }
-      return sum;
-    };
-
     // Pick the seed: highest-RF-scored candidate (after concentration
     // power amplification). Same selection as RfRoomAware.
     let bestSeedIdx = 0;
@@ -350,11 +306,91 @@ export class RfPhysicsLocator implements Locator {
         bestSeedIdx = i;
       }
     }
+    const seedX = scored[bestSeedIdx].cx;
+    const seedY = scored[bestSeedIdx].cy;
 
-    const refined = nelderMead2D(objective, [
-      scored[bestSeedIdx].cx,
-      scored[bestSeedIdx].cy,
-    ]);
+    // ── RF-informed outlier rejection ──
+    //
+    // Compute each fix's expected measured distance at the seed
+    // position using the RF model. Drop fixes whose actual
+    // measurement is way less than expected — those are the
+    // long-path undershoots that aggressive per-fix weighting would
+    // have to handle continuously (and unstably). Doing it as a
+    // binary keep/drop here means the resulting NM input is a clean
+    // set with uniform weighting, no per-frame instability from
+    // weights that depend on the moving candidate position.
+    interface FixWithResidual {
+      fix: NodeFix;
+      expectedAtSeed: number;
+      residualRatio: number; // measured / expected
+    }
+    const evaluated: FixWithResidual[] = fixes.map((fix) => {
+      const dx = seedX - fix.point[0];
+      const dy = seedY - fix.point[1];
+      const calc = Math.sqrt(dx * dx + dy * dy);
+      const W = rfActive ? wAt(fix.nodeId, seedX, seedY) : 0;
+      const aN = absFor(fix.nodeId);
+      // Firmware's expected reading at the seed: true distance,
+      // inflated by the model's wall correction.
+      const expected = Math.max(0.1, calc * Math.pow(10, W / (10 * aN)));
+      return {
+        fix,
+        expectedAtSeed: expected,
+        residualRatio: fix.distance / expected,
+      };
+    });
+
+    let keptFixes = evaluated
+      .filter((e) =>
+        e.residualRatio >= OUTLIER_UNDERSHOOT_RATIO ||
+        e.expectedAtSeed < ALWAYS_TRUST_SHORT_M,
+      )
+      .map((e) => e.fix);
+
+    if (keptFixes.length < MIN_KEPT_FIXES) {
+      // Too aggressive — keep the top N by absolute log-residual
+      // (closest to expected) regardless of cutoff.
+      keptFixes = [...evaluated]
+        .sort(
+          (a, b) =>
+            Math.abs(Math.log(a.residualRatio)) -
+            Math.abs(Math.log(b.residualRatio)),
+        )
+        .slice(0, Math.max(MIN_KEPT_FIXES, evaluated.length))
+        .map((e) => e.fix);
+    }
+
+    // ── NM refinement on kept fixes ──
+    //
+    // Closure-capture the kept set so the existing `objective`
+    // (which iterates `fixes`) isn't used. Build a fresh objective
+    // restricted to the kept set with uniform per-fix weighting.
+    const kept = keptFixes;
+    const trimmedObjective = (p: [number, number]): number => {
+      let sum = 0;
+      for (const f of kept) {
+        const dx = p[0] - f.point[0];
+        const dy = p[1] - f.point[1];
+        const calc = Math.sqrt(dx * dx + dy * dy);
+        if (calc < 0.1) continue;
+        const W = rfActive ? wAt(f.nodeId, p[0], p[1]) : 0;
+        const aN = absFor(f.nodeId);
+        const measuredAdjusted =
+          f.distance / Math.pow(10, W / (10 * aN));
+        const r = calc - measuredAdjusted;
+        const absR = Math.abs(r);
+        const lossR =
+          absR <= HUBER_DELTA
+            ? 0.5 * r * r
+            : HUBER_DELTA * (absR - 0.5 * HUBER_DELTA);
+        const dirWeight = r > 0 ? ASYM_OVER_WEIGHT : ASYM_UNDER_WEIGHT;
+        const baseW = 1 / (f.distance * f.distance + 1e-6);
+        sum += baseW * dirWeight * lossR;
+      }
+      return sum;
+    };
+
+    const refined = nelderMead2D(trimmedObjective, [seedX, seedY]);
     const posX = refined.x[0];
     const posY = refined.x[1];
 
