@@ -49,23 +49,47 @@ import type { Locator, LocatorResult, NodeFix } from "./types";
 
 /**
  * Scale (in dB) for the exponential RF weighting. Hand-tuned so the
- * weighting curve roughly matches what we'd want intuitively:
+ * per-wall penalty is meaningful but not catastrophic:
  *
  *   W (dB)    weight
  *   ─────────────────
  *   0         1.00     (open path, same room)
- *   2         0.72     (one open doorway through a thin wall)
- *   4         0.51     (one drywall)
- *   8         0.26     (two drywalls, or one exterior)
- *   12        0.13     (three drywalls)
- *   20        0.04     (heavy walls + exterior)
+ *   2         0.61     (one open doorway through a thin wall)
+ *   4         0.37     (one drywall)
+ *   8         0.14     (two drywalls, or one exterior)
+ *   12        0.05     (three drywalls)
+ *   20        0.007    (heavy walls + exterior)
  *
- * Smaller scale → harder cutoff (more like the old ternary).
- * Larger scale → softer cutoff (cross-wall paths matter more).
- * 6 dB feels right: gives a meaningful penalty per wall without
- * eliminating cross-wall pairs entirely.
+ * Smaller scale → harder cutoff (more like the old ternary). Larger
+ * scale → softer cutoff (cross-wall paths matter more). 4 dB is the
+ * sweet spot we landed on after observing wrong-room failures with
+ * scale=6: scale=6 left cross-wall candidates with too much weight
+ * (one wall → 0.51, still nearly half the influence of a clean path),
+ * which let a noisy wrong-room fix pull the centroid out of the right
+ * room. scale=4 drops one wall to ~0.37 and two walls to ~0.14 —
+ * cross-wall candidates contribute but no longer dominate.
  */
-const RF_WEIGHT_SCALE_DB = 6;
+const RF_WEIGHT_SCALE_DB = 4;
+
+/**
+ * Power applied to candidate scores when computing the position
+ * centroid: `position = Σ score_i^POWER × candidate_i / Σ score_i^POWER`.
+ *
+ * With POWER=1 (plain weighted centroid), a wrong-room candidate
+ * with score 0.4 contributes 40% as much to the position as a
+ * right-room candidate with score 1.0 — enough to noticeably tug the
+ * estimate when several wrong-room candidates pile up. With POWER=4,
+ * the same wrong-room candidate contributes only 0.4⁴ = 2.5% — the
+ * top-scoring cluster dominates and the wrong-room contributions
+ * fade to near-zero noise.
+ *
+ * Equivalent to a soft "winner takes most" without the brittleness
+ * of picking a single hard winner (which would be vulnerable to a
+ * lucky high-score candidate at the wrong spot). The power value is
+ * a tuning knob: too low and wrong-room failures recur; too high and
+ * single-candidate sensitivity returns.
+ */
+const SCORE_CONCENTRATION_POWER = 4;
 
 /**
  * Relative tolerance for "circle agrees with candidate" — same as
@@ -146,14 +170,20 @@ export class RfRoomAwareLocator implements Locator {
       scored.push({ cx: o.cx, cy: o.cy, score });
     }
 
-    // Score-weighted centroid of candidates.
+    // Concentrated weighted centroid: weight ∝ score^POWER. Pure
+    // weighted centroid (POWER=1) lets wrong-room candidates with
+    // moderate scores still pull the position; raising to a power
+    // amplifies the dominance of the top-scoring cluster so the
+    // centroid lands in it rather than in the no-man's-land between
+    // it and the runner-up. Equivalent to a soft "winner takes most."
     let wx = 0;
     let wy = 0;
     let wTotal = 0;
     for (const s of scored) {
-      wx += s.score * s.cx;
-      wy += s.score * s.cy;
-      wTotal += s.score;
+      const w = Math.pow(Math.max(0, s.score), SCORE_CONCENTRATION_POWER);
+      wx += w * s.cx;
+      wy += w * s.cy;
+      wTotal += w;
     }
     if (wTotal <= 1e-9) return fallbackIDW(fixes, this.name);
     const posX = wx / wTotal;
