@@ -109,7 +109,9 @@ export function buildLocator(config: Config): LocatorBundle {
   // attenuation to weight cross-room circle overlaps instead of the
   // ternary 1.0/0.8/0.005. Compared side-by-side here so the user can
   // verify it before promoting it to the active locator.
-  const rfRoomAware = new OutlierRejectingLocator(new RfRoomAwareLocator());
+  const rfRoomAware = new OutlierRejectingLocator(
+    new RfRoomAwareLocator(allRooms, config.nodes),
+  );
 
   const allBases: Locator[] = [
     idw,

@@ -449,7 +449,7 @@ export function pointInPolygon(
  * epsilon). Returns a Set of "roomA|roomB" strings (alphabetically
  * ordered) for quick lookup.
  */
-function computeRoomAdjacency(rooms: readonly Room[]): Set<string> {
+export function computeRoomAdjacency(rooms: readonly Room[]): Set<string> {
   const pairs = new Set<string>();
   const eps = ADJACENCY_EPSILON;
 

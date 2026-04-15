@@ -1,23 +1,19 @@
+import type { Node, Room } from "@/lib/config";
+import { openToId } from "@/lib/config/schema";
 import { buildObstructionFn } from "@/lib/map/rf_cache";
 import { getStore } from "@/lib/state/store";
-import { computeAllOverlaps } from "./room_aware";
+import {
+  computeAllOverlaps,
+  computeRoomAdjacency,
+  findRoom,
+} from "./room_aware";
 import type { Locator, LocatorResult, NodeFix } from "./types";
 
 /**
  * RF-aware variant of RoomAwareLocator.
  *
- * RoomAware downweights cross-room circle overlaps via a hardcoded
- * ternary (1.0 / 0.8 / 0.005) based on whether the two pair nodes are
- * in the same / adjacent / non-adjacent room as a vote-determined
- * "device room." That weighting is insensitive to HOW different two
- * rooms are RF-wise: nursery↔guest_bedroom (one drywall) and
- * garage↔master_bathroom (5+ walls + exterior) both collapse to the
- * same 0.005 weight, which is too punishing for the former and too
- * lenient for the latter.
- *
- * This locator replaces the ternary with a continuous weighting based
- * on the actual structural attenuation between each pair node and the
- * candidate position, computed from the RF map (`obstructionLossDb`):
+ * Replaces RoomAware's binary cross-room weighting (1.0 / 0.8 / 0.005)
+ * with a continuous attenuation-based score from the RF map:
  *
  *     pairWeight = exp( −(W(n1, candidate) + W(n2, candidate)) / SCALE )
  *
@@ -26,70 +22,90 @@ import type { Locator, LocatorResult, NodeFix } from "./types";
  * never to literally zero — they still contribute information about
  * "the device probably isn't on the far side of those walls."
  *
- * The closest-node room vote and the iterative room refinement from
- * RoomAware are dropped — they were a workaround for the ternary's
- * binary "is this room or not" question. With continuous RF cost,
- * every candidate position is scored on its own RF coherence with
- * each pair, no need to commit to a room first.
+ * Three additional ingredients beyond pure RF weighting:
  *
- * **Why same-or-similar weighting still works for short paths**: when
- * both pair nodes are in the same room as the candidate (W ≈ 0 for
- * both), the exponent is 1.0 — equivalent to RoomAware's SAME_ROOM
- * weight. When one node is across one wall (W ≈ 2–4 dB), weight drops
- * to ~0.5–0.7 — between RoomAware's SAME (1.0) and ADJACENT (0.8).
- * When across multiple walls or an exterior (W ≈ 10+ dB), weight drops
- * to ~0.2 or below — comparable to RoomAware's CROSS_ROOM (0.005)
- * but never quite zero.
+ * 1. **Score concentration via power**: candidates' centroid weight is
+ *    `score^POWER` rather than `score`. Equivalent to a soft "winner
+ *    takes most" — keeps wrong-room candidates from tugging the
+ *    centroid even when their RF weight isn't quite zero.
  *
- * **Falls back to RoomAware's geometry** when the RF cache isn't
+ * 2. **Closest-node room prior**: the closest-distance reporting node
+ *    is essentially ground truth on which room the device is in (BLE
+ *    at very short range is dominated by line-of-sight). Candidates
+ *    that fall in the closest-node's room get a meaningful score
+ *    bonus; candidates in adjacent rooms get a smaller bonus. This
+ *    breaks the symmetry near walls — pure RF weighting from a
+ *    wall-mounted node gives nearly-equal weight to candidates on
+ *    either side of the wall, which lets the geometric trilateration
+ *    pull pick the wrong side. The room prior captures a
+ *    measurement-based signal that RF physics alone cannot infer.
+ *
+ * 3. **Continuous RF coherence (the original idea)**: every cross-pair
+ *    contribution scales with how much structural attenuation lies
+ *    between the pair's nodes and the candidate position.
+ *
+ * **Why all three are needed**: the continuous RF weighting handles the
+ * far-from-wall cases (RoomAware over-penalized adjacent rooms there).
+ * The closest-node room prior handles wall-hugging cases (pure RF
+ * weighting is symmetric across walls, so the geometric pull from far
+ * nodes can win the wrong side). The score-concentration power keeps
+ * the wrong-room minority of candidates from tugging the position.
+ *
+ * **Falls back to RoomAware-style geometry** when the RF cache isn't
  * available (pre-bootstrap or fresh deploy). The obstruction-fn
- * builder returns null in that case and we treat W as 0 — the locator
- * reduces to a uniformly-weighted pairwise overlap voter.
+ * builder returns null in that case and we treat W as 0.
  */
 
 /**
- * Scale (in dB) for the exponential RF weighting. Hand-tuned so the
- * per-wall penalty is meaningful but not catastrophic:
+ * Scale (in dB) for the exponential RF weighting. See the table below
+ * for what this maps to in attenuation terms:
  *
- *   W (dB)    weight
- *   ─────────────────
+ *   W (dB)    weight (scale=4)
+ *   ─────────────────────────────
  *   0         1.00     (open path, same room)
- *   2         0.61     (one open doorway through a thin wall)
+ *   2         0.61     (one open doorway / thin wall)
  *   4         0.37     (one drywall)
  *   8         0.14     (two drywalls, or one exterior)
  *   12        0.05     (three drywalls)
  *   20        0.007    (heavy walls + exterior)
- *
- * Smaller scale → harder cutoff (more like the old ternary). Larger
- * scale → softer cutoff (cross-wall paths matter more). 4 dB is the
- * sweet spot we landed on after observing wrong-room failures with
- * scale=6: scale=6 left cross-wall candidates with too much weight
- * (one wall → 0.51, still nearly half the influence of a clean path),
- * which let a noisy wrong-room fix pull the centroid out of the right
- * room. scale=4 drops one wall to ~0.37 and two walls to ~0.14 —
- * cross-wall candidates contribute but no longer dominate.
  */
 const RF_WEIGHT_SCALE_DB = 4;
 
 /**
  * Power applied to candidate scores when computing the position
- * centroid: `position = Σ score_i^POWER × candidate_i / Σ score_i^POWER`.
- *
- * With POWER=1 (plain weighted centroid), a wrong-room candidate
- * with score 0.4 contributes 40% as much to the position as a
- * right-room candidate with score 1.0 — enough to noticeably tug the
- * estimate when several wrong-room candidates pile up. With POWER=4,
- * the same wrong-room candidate contributes only 0.4⁴ = 2.5% — the
- * top-scoring cluster dominates and the wrong-room contributions
- * fade to near-zero noise.
- *
- * Equivalent to a soft "winner takes most" without the brittleness
- * of picking a single hard winner (which would be vulnerable to a
- * lucky high-score candidate at the wrong spot). The power value is
- * a tuning knob: too low and wrong-room failures recur; too high and
- * single-candidate sensitivity returns.
+ * centroid. Higher = more "winner takes most." See doc comment at
+ * top of file for the design rationale.
  */
 const SCORE_CONCENTRATION_POWER = 4;
+
+/**
+ * Multiplicative bonus applied to candidates whose room matches the
+ * closest-distance-reporting node's room. With BONUS=1.0, in-room
+ * candidates double their score (factor 2.0); after the
+ * SCORE_CONCENTRATION_POWER they dominate in-room contributions by a
+ * very large margin (2^4 = 16× the centroid weight of out-of-room
+ * candidates). Tuned to be strong enough to win wall-hugging cases
+ * while still letting clear cross-room evidence override.
+ */
+const CLOSEST_ROOM_BONUS = 1.0;
+
+/**
+ * Multiplicative bonus for candidates in rooms ADJACENT to the
+ * closest-node's room. Adjacent = shares a polygon edge or has an
+ * `open_to` declaration or shares a `floor_area` tag. Smaller than
+ * the in-room bonus so the closest-node's room still wins ties, but
+ * non-zero so a device standing at a doorway can land on either side.
+ */
+const ADJACENT_ROOM_BONUS = 0.4;
+
+/**
+ * Minimum distance at which the closest-node room prior fires. If the
+ * "closest" node is itself far away, its room signal is weak and we'd
+ * rather let pure RF weighting decide. 6 m is roughly the threshold
+ * where BLE measurements become geometry-noisy enough that "device is
+ * in this node's room" stops being a reliable inference.
+ */
+const CLOSEST_PRIOR_MAX_DIST_M = 6;
 
 /**
  * Relative tolerance for "circle agrees with candidate" — same as
@@ -100,6 +116,75 @@ const REL_TOL = 0.15;
 
 export class RfRoomAwareLocator implements Locator {
   readonly name = "rf_room_aware";
+  private readonly rooms: Room[];
+  private readonly nodeRooms: Map<string, string | null>;
+  private readonly adjacentPairs: Set<string>;
+
+  constructor(rooms: Room[], nodes: readonly Node[]) {
+    this.rooms = rooms;
+
+    // Same room/node bookkeeping RoomAware does — id-or-name resolver,
+    // adjacency from shared edges + open_to + floor_area, and per-node
+    // explicit-or-geometric room assignment.
+    const idByLabel = new Map<string, string>();
+    for (const r of rooms) {
+      const id = r.id;
+      if (!id) continue;
+      idByLabel.set(id, id);
+      if (r.name) idByLabel.set(r.name, id);
+    }
+    const resolveRoom = (label: string | undefined): string | null =>
+      label ? (idByLabel.get(label) ?? null) : null;
+
+    this.adjacentPairs = computeRoomAdjacency(rooms);
+    for (const r of rooms) {
+      const aId = r.id;
+      if (!aId) continue;
+      for (const ot of r.open_to) {
+        const bId = resolveRoom(openToId(ot));
+        if (!bId || bId === aId) continue;
+        const key = aId < bId ? `${aId}|${bId}` : `${bId}|${aId}`;
+        this.adjacentPairs.add(key);
+      }
+    }
+    const byArea = new Map<string, string[]>();
+    for (const r of rooms) {
+      if (!r.id || !r.floor_area) continue;
+      const list = byArea.get(r.floor_area) ?? [];
+      list.push(r.id);
+      byArea.set(r.floor_area, list);
+    }
+    for (const ids of byArea.values()) {
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          const aId = ids[i];
+          const bId = ids[j];
+          const key = aId < bId ? `${aId}|${bId}` : `${bId}|${aId}`;
+          this.adjacentPairs.add(key);
+        }
+      }
+    }
+
+    this.nodeRooms = new Map();
+    for (const n of nodes) {
+      if (!n.id) continue;
+      const explicit = resolveRoom(n.room);
+      if (explicit) {
+        this.nodeRooms.set(n.id, explicit);
+      } else if (n.point) {
+        this.nodeRooms.set(n.id, findRoom(rooms, [n.point[0], n.point[1]]));
+      } else {
+        this.nodeRooms.set(n.id, null);
+      }
+    }
+  }
+
+  private roomsConnected(a: string | null, b: string | null): boolean {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+    return this.adjacentPairs.has(key);
+  }
 
   solve(fixes: readonly NodeFix[]): LocatorResult | null {
     if (fixes.length < 2) return null;
@@ -107,9 +192,7 @@ export class RfRoomAwareLocator implements Locator {
     const overlaps = computeAllOverlaps(fixes);
     if (overlaps.length === 0) return fallbackIDW(fixes, this.name);
 
-    // Pre-build per-fix obstruction closures. Each computes dB loss
-    // from that node to a target point. Cached at the start so we
-    // don't re-do the floor/wall lookup per candidate.
+    // Pre-build per-fix obstruction closures.
     const obstructionFns = new Map<string, (px: number, py: number) => number>();
     for (const f of fixes) {
       const fn = buildObstructionFn(f.nodeId, [f.point[0], f.point[1]]);
@@ -120,7 +203,26 @@ export class RfRoomAwareLocator implements Locator {
       return fn ? fn(px, py) : 0;
     };
 
-    // Per-pair calibration r² — same trust signal RoomAware uses.
+    // Closest-node room prior: identify the closest-distance reporting
+    // node and use its assigned room as a tiebreaker for candidates.
+    // Skipped (set to null) when the closest node is far enough away
+    // that its room inference is no longer reliable.
+    let closestRoom: string | null = null;
+    {
+      let bestDist = Infinity;
+      let bestNode: string | null = null;
+      for (const f of fixes) {
+        if (f.distance < bestDist) {
+          bestDist = f.distance;
+          bestNode = f.nodeId;
+        }
+      }
+      if (bestNode != null && bestDist <= CLOSEST_PRIOR_MAX_DIST_M) {
+        closestRoom = this.nodeRooms.get(bestNode) ?? null;
+      }
+    }
+
+    // Per-pair calibration r².
     const store = getStore();
     const lookupR2 = (a: string, b: string): number => {
       const aFits = store.nodePairFits.get(a);
@@ -138,15 +240,32 @@ export class RfRoomAwareLocator implements Locator {
     const scored: ScoredCandidate[] = [];
 
     for (const o of overlaps) {
-      // RF coherence: how much would signal need to traverse to
-      // reach this candidate from each of the pair's two nodes?
-      // Sum and exponentiate — joint coherence of the pair.
+      // RF coherence between the pair and the candidate position.
       const w1 = wAt(o.nodeId1, o.cx, o.cy);
       const w2 = wAt(o.nodeId2, o.cx, o.cy);
       const rfWeight = Math.exp(-(w1 + w2) / RF_WEIGHT_SCALE_DB);
 
       const r2 = lookupR2(o.nodeId1, o.nodeId2);
-      const pairWeight = o.gdop * rfWeight * (0.5 + 0.5 * r2) * o.sizeWeight;
+      let pairWeight = o.gdop * rfWeight * (0.5 + 0.5 * r2) * o.sizeWeight;
+
+      // Closest-node room prior: figure out which room the candidate
+      // sits in via point-in-polygon, then bonus based on relationship
+      // to the closest-node's room. This is the bit that breaks
+      // wall-hugging symmetry — pure RF weighting from a wall-mounted
+      // node gives near-equal scores to candidates on either side of
+      // the wall, but the closest-node's room is a strong measurement-
+      // based signal that breaks the tie.
+      if (closestRoom != null) {
+        const candidateRoom = findRoom(this.rooms, [o.cx, o.cy]);
+        if (candidateRoom === closestRoom) {
+          pairWeight *= 1 + CLOSEST_ROOM_BONUS;
+        } else if (this.roomsConnected(candidateRoom, closestRoom)) {
+          pairWeight *= 1 + ADJACENT_ROOM_BONUS;
+        }
+        // Non-adjacent: no bonus (factor 1.0). The RF weighting
+        // already discounts these via W; we don't pile on additional
+        // penalty here, the prior is purely a positive nudge.
+      }
 
       // Consensus: how many OTHER circles pass through this candidate,
       // each contribution weighted by its own RF coherence with the
@@ -170,12 +289,7 @@ export class RfRoomAwareLocator implements Locator {
       scored.push({ cx: o.cx, cy: o.cy, score });
     }
 
-    // Concentrated weighted centroid: weight ∝ score^POWER. Pure
-    // weighted centroid (POWER=1) lets wrong-room candidates with
-    // moderate scores still pull the position; raising to a power
-    // amplifies the dominance of the top-scoring cluster so the
-    // centroid lands in it rather than in the no-man's-land between
-    // it and the runner-up. Equivalent to a soft "winner takes most."
+    // Concentrated weighted centroid (winner takes most).
     let wx = 0;
     let wy = 0;
     let wTotal = 0;
@@ -200,8 +314,7 @@ export class RfRoomAwareLocator implements Locator {
 
     // Confidence: weighted "how many circles agree at the chosen
     // position" where the weight is each fix's RF coherence with the
-    // final position. Penalizes solutions where high-coherence fixes
-    // (clear-path nodes) disagree with the picked spot.
+    // final position.
     let agreeNum = 0;
     let totalDen = 0;
     for (const f of fixes) {
@@ -231,12 +344,6 @@ export class RfRoomAwareLocator implements Locator {
   }
 }
 
-/**
- * Same fallback as RoomAware's: pure IDW when no circles intersect
- * (typically because all reported distances are mutually exclusive,
- * which means at least some are wildly off and any geometric solver
- * would struggle).
- */
 function fallbackIDW(fixes: readonly NodeFix[], name: string): LocatorResult {
   let wx = 0;
   let wy = 0;
