@@ -13,61 +13,65 @@ import type { Locator, LocatorResult, NodeFix } from "./types";
 /**
  * Physics-driven RF locator.
  *
- * RfRoomAware uses the RF map for *weighting* — it scores candidate
- * positions by their RF coherence with each pair, then refines via a
- * trilateration-style Nelder-Mead. Geometry is the primary signal;
- * RF is a secondary trust modifier.
+ * Two RF-map-driven changes from RfRoomAware:
  *
- * RfPhysics extends that by using the RF model to **pre-adjust the
- * measurements themselves** before trilateration. For each fix:
+ *   1. **Measurement correction**: each firmware-reported distance
+ *      is divided by `10^(W / (10·a_n))` to strip the model-predicted
+ *      wall loss before trilateration. For paths the RF map captures
+ *      correctly, the corrected distance is approximately the true
+ *      geometric distance.
  *
- *     measured_adjusted = measured / 10^(W(p, node) / (10·a_n))
+ *   2. **Per-fix RF reliability weighting**: each fix's contribution
+ *      to the NM objective is weighted by `exp(-W / 2 dB)`. Far or
+ *      wall-heavy fixes effectively drop out of the optimization.
+ *      Mirrors RoomAware's hard cross-room weight cut, but
+ *      continuous and tied to actual attenuation rather than binary
+ *      topology.
  *
- * This strips the model-predicted wall attenuation out of the
- * firmware-reported distance, leaving (approximately) the true
- * geometric distance plus whatever attenuation the model didn't
- * capture. Asymmetric distance-space NM then converges to a
- * position that's geometrically consistent with the corrected
- * distances.
+ * The motivating problem: in real BLE deployments, *long-distance
+ * fixes systematically undershoot* — firmware absorption is tuned for
+ * short cluttered paths, so for long open paths it over-attenuates
+ * and reports distances much shorter than reality. The asymmetric
+ * loss in RfRoomAware (which assumes overshoot is the typical
+ * direction) then pulls position toward those wrong far-fix
+ * measurements.
  *
- * Why this rather than dB-space residuals: a previous iteration
- * minimized `predicted_rssi - observed_rssi` directly. That's
- * theoretically cleaner but requires the RF model to be very
- * accurate — when the model under-predicts wall loss by 5–15 dB
- * (typical, since multipath / body shadow / fading add real loss the
- * configured walls don't see), the dB-space optimizer is
- * systematically biased to push positions away from nodes to
- * compensate. The measured-distance correction approach degrades
- * gracefully: if W is correct, measured_adjusted = true distance and
- * fit is perfect; if W under-predicts, measured_adjusted is still
- * larger than true but the asymmetric loss handles that exactly the
- * way RfRoomAware does today.
- *
- * Differences from RfRoomAware:
- *
- *   1. **Pre-adjusted measurements** (above) — RfRoomAware fits raw
- *      measured distances; RfPhysics fits measured-with-walls-removed.
- *      In well-modeled paths the corrected distance is closer to
- *      truth, so NM converges tighter.
- *
- *   2. **Per-fix RF coherence weighting.** Fixes from nodes with
- *      heavy attenuation to the candidate are trusted less — noisier
- *      paths contribute less to the position estimate.
- *
- *   3. **Seed selection by physics fit, not just RF score.** After
- *      RF-coherence scoring, evaluate the top candidates against the
- *      physics objective and pick the one with lowest residual as
- *      the NM seed.
+ * Per-fix RF reliability weighting downweights those problematic
+ * long fixes, letting nearby clean-path fixes dominate. The
+ * measurement correction further refines what's left.
  *
  * Falls back to RfRoomAware-equivalent behavior (no measurement
- * adjustment) when the RF cache isn't built yet.
+ * adjustment, uniform per-fix weight) when the RF cache isn't built.
  */
 
 /**
- * Scale (in dB) for the exponential RF weighting in candidate scoring
- * and per-fix weighting. Same as RfRoomAware's value; tested at 4 dB.
+ * Scale (in dB) for the exponential RF weighting in candidate
+ * scoring (pair coherence). Same as RfRoomAware's value; tested at
+ * 4 dB.
  */
 const RF_WEIGHT_SCALE_DB = 4;
+
+/**
+ * Scale (in dB) for per-fix reliability weighting inside the NM
+ * objective. Sharper than the candidate-scoring scale because we
+ * want fixes from far/walled paths to effectively drop out of the
+ * fit — these measurements are noisy enough (multipath, body shadow,
+ * firmware-absorption mismatch over long paths) that they actively
+ * mislead the optimizer when included with non-trivial weight.
+ *
+ *   W (dB)    weight
+ *   ─────────────────
+ *   0         1.00     (open path, fully trusted)
+ *   2         0.37     (one open doorway, half-trusted)
+ *   4         0.14     (one drywall, mostly ignored)
+ *   6         0.05     (two walls, near-zero)
+ *   8         0.018    (heavy obstruction, dropped)
+ *
+ * Effectively a continuous "drop fixes whose paths the model says
+ * are unreliable" — the analogue of RoomAware's hard ternary cut for
+ * cross-room measurements, but graded by actual attenuation.
+ */
+const RF_FIX_RELIABILITY_SCALE_DB = 2;
 
 /** Score concentration power for seed selection (winner takes most). */
 const SCORE_CONCENTRATION_POWER = 4;
@@ -101,15 +105,8 @@ const ASYM_UNDER_WEIGHT = 0.1;
 /** Huber inflection in distance-space (meters). Same as RfRoomAware. */
 const HUBER_DELTA = 1.5;
 
-/** Number of top RF-scored candidates to evaluate against the physics
- *  objective when picking the seed. More = better seed but more compute. */
-const SEED_CANDIDATE_K = 5;
-
 /** Default firmware absorption when a node's value isn't available. */
 const DEFAULT_ABSORPTION = 4.0;
-
-/** Default path-loss exponent when RF cache isn't built. */
-const DEFAULT_PATH_LOSS_EXPONENT = 3.0;
 
 export class RfPhysicsLocator implements Locator {
   readonly name = "rf_physics";
@@ -220,11 +217,11 @@ export class RfPhysicsLocator implements Locator {
     const absFor = (nodeId: string): number =>
       absorptionByNode.get(nodeId) ?? DEFAULT_ABSORPTION;
 
-    // RF model parameters. When the cache isn't built yet, fall back
-    // to defaults — the locator degrades to pure trilateration in
-    // that mode.
+    // RF model active flag. When the cache isn't built yet, the
+    // measurement correction degrades to a no-op (W=0 → adjustment
+    // factor = 1 → measured_adjusted = measured) and behavior is
+    // identical to RfRoomAware.
     const rfParams = getRfParams();
-    const nPath = rfParams?.pathLossExponent ?? DEFAULT_PATH_LOSS_EXPONENT;
     const rfActive = rfParams != null && obstructionFns.size > 0;
 
     // Closest-node room prior (same logic as RfRoomAware).
@@ -283,25 +280,34 @@ export class RfPhysicsLocator implements Locator {
     }
     if (scored.length === 0) return fallbackIDW(fixes, this.name);
 
-    // ── Stage 2: distance-space NM with RF-corrected measurements ──
-    //
-    // For each fix, strip the model-predicted wall loss out of the
-    // firmware-reported distance:
+    // Distance-space NM with RF-corrected measurements AND per-fix
+    // RF reliability weighting. For each fix:
     //
     //   measured_adjusted = measured / 10^(W(p, node) / (10·a_n))
+    //   r                 = calc - measured_adjusted
+    //   reliability       = exp(-W(p, node) / RF_FIX_RELIABILITY_SCALE_DB)
     //
-    // then minimize the asymmetric Huber residual
-    //   r = calc - measured_adjusted
-    // (over-residuals heavily penalized; under-residuals lightly,
-    // accepting that the model may under-predict W).
+    // then minimize Σ (1/d²) · reliability · ρ_asym(r).
     //
-    // Per-fix coherence weighting: fixes from heavily-obstructed
-    // paths are noisier; trust them less.
+    // The reliability factor is the new ingredient. Far/walled fixes
+    // (high W from the candidate) get exponentially down-weighted,
+    // mirroring what RoomAware achieves with its hard cross-room
+    // weight cut — except continuously and tied to the actual RF map
+    // rather than binary topology. The sharper scale (2 dB vs 4 for
+    // pair scoring) makes it aggressive enough that high-W fixes
+    // effectively drop out: at W≥6 dB their contribution is <5%.
     //
-    // Note that W (and thus measured_adjusted) is recomputed at every
-    // NM step because it depends on the candidate position. That's
-    // the point — the RF map participates in defining the objective
-    // throughout the optimization.
+    // Why this matters: long-path measurements undershoot
+    // systematically (firmware absorption is calibrated for short
+    // cluttered paths, so it over-attenuates the long ones and
+    // reports too-short distances). Without per-fix RF weighting,
+    // those wrong measurements pull the optimizer in the wrong
+    // direction. With it, they're effectively ignored and the
+    // optimizer focuses on local clean fixes.
+    //
+    // W is recomputed at every NM step because it depends on the
+    // candidate position — that's the point, the RF map participates
+    // in the objective throughout the optimization.
     const objective = (p: [number, number]): number => {
       let sum = 0;
       for (const f of fixes) {
@@ -313,10 +319,6 @@ export class RfPhysicsLocator implements Locator {
         const W = rfActive ? wAt(f.nodeId, p[0], p[1]) : 0;
         const aN = absFor(f.nodeId);
 
-        // Strip model-predicted wall loss from the firmware reading.
-        // For a path the model captures correctly, adjusted ≈ true
-        // distance. For an under-modeled path, adjusted is still
-        // bigger than true but only by the unmodeled portion.
         const measuredAdjusted =
           f.distance / Math.pow(10, W / (10 * aN));
 
@@ -328,50 +330,31 @@ export class RfPhysicsLocator implements Locator {
             : HUBER_DELTA * (absR - 0.5 * HUBER_DELTA);
 
         const dirWeight = r > 0 ? ASYM_OVER_WEIGHT : ASYM_UNDER_WEIGHT;
-        // Per-fix weighting: closer and less-obstructed → more reliable.
-        // Weight uses the *original* measured distance for the 1/d²
-        // baseline (closer fixes are intrinsically more reliable
-        // regardless of model corrections); the RF coherence factor
-        // is independent.
         const baseW = 1 / (f.distance * f.distance + 1e-6);
-        const coh = rfActive
-          ? Math.exp(-W / RF_WEIGHT_SCALE_DB)
+        const reliability = rfActive
+          ? Math.exp(-W / RF_FIX_RELIABILITY_SCALE_DB)
           : 1;
-        sum += baseW * coh * dirWeight * lossR;
+        sum += baseW * reliability * dirWeight * lossR;
       }
       return sum;
     };
 
-    // ── Stage 3: pick the seed that the physics objective likes best ──
-    //
-    // Standard "highest-RF-scored candidate" gives a room-correct
-    // seed but may not be the geometric basin NM should converge to.
-    // Evaluate the top-K RF-scored candidates against the physics
-    // objective itself, pick the one with the lowest residual. NM
-    // converges from the most-physics-consistent starting point.
-    const topK = [...scored]
-      .map((s) => ({
-        ...s,
-        concentratedScore: Math.pow(
-          Math.max(0, s.score),
-          SCORE_CONCENTRATION_POWER,
-        ),
-      }))
-      .sort((a, b) => b.concentratedScore - a.concentratedScore)
-      .slice(0, Math.min(SEED_CANDIDATE_K, scored.length));
-
-    let bestSeed = topK[0];
-    let bestObj = objective([topK[0].cx, topK[0].cy]);
-    for (let i = 1; i < topK.length; i++) {
-      const obj = objective([topK[i].cx, topK[i].cy]);
-      if (obj < bestObj) {
-        bestObj = obj;
-        bestSeed = topK[i];
+    // Pick the seed: highest-RF-scored candidate (after concentration
+    // power amplification). Same selection as RfRoomAware.
+    let bestSeedIdx = 0;
+    let bestSeedScore = -Infinity;
+    for (let i = 0; i < scored.length; i++) {
+      const w = Math.pow(Math.max(0, scored[i].score), SCORE_CONCENTRATION_POWER);
+      if (w > bestSeedScore) {
+        bestSeedScore = w;
+        bestSeedIdx = i;
       }
     }
 
-    // ── Stage 4: NM refinement ──
-    const refined = nelderMead2D(objective, [bestSeed.cx, bestSeed.cy]);
+    const refined = nelderMead2D(objective, [
+      scored[bestSeedIdx].cx,
+      scored[bestSeedIdx].cy,
+    ]);
     const posX = refined.x[0];
     const posY = refined.x[1];
 
@@ -385,10 +368,10 @@ export class RfPhysicsLocator implements Locator {
     }
 
     // Confidence: fraction of fixes whose RF-corrected distance is
-    // close to |p − node|, weighted by RF coherence. High agreement →
-    // high confidence.
-    let agreeNum = 0;
-    let totalDen = 0;
+    // within Huber-delta of |p − node|. Same form as RfRoomAware,
+    // computed on corrected distances.
+    let agreeing = 0;
+    let total = 0;
     for (const f of fixes) {
       const dx = posX - f.point[0];
       const dy = posY - f.point[1];
@@ -398,11 +381,10 @@ export class RfPhysicsLocator implements Locator {
       const aN = absFor(f.nodeId);
       const measuredAdjusted =
         f.distance / Math.pow(10, W / (10 * aN));
-      const coh = rfActive ? Math.exp(-W / RF_WEIGHT_SCALE_DB) : 1;
-      totalDen += coh;
-      if (Math.abs(calc - measuredAdjusted) < HUBER_DELTA) agreeNum += coh;
+      total += 1;
+      if (Math.abs(calc - measuredAdjusted) < HUBER_DELTA) agreeing += 1;
     }
-    const agreeRatio = totalDen > 0 ? agreeNum / totalDen : 0;
+    const agreeRatio = total > 0 ? agreeing / total : 0;
     const fixScore = Math.min(1, fixes.length / 6);
     const confidence = Math.max(
       0,
