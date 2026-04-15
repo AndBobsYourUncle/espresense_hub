@@ -183,6 +183,19 @@ export interface GroundTruthSample {
   /** Firmware absorption value at the time the sample was recorded. */
   absorptionAtTime: number;
   timestamp: number;
+  /**
+   * Structural attenuation in dB between transmitter and listener at
+   * sample time — walls, doors, and exterior crossings summed with
+   * their config weights. The calibration fit subtracts this from the
+   * observed log-distance so the fitted path-loss exponent reflects
+   * propagation through clutter/furniture only, not the house's
+   * structural geometry.
+   *
+   * Optional for backward compatibility: samples persisted before this
+   * field existed (or recorded when no floors were defined) treat it
+   * as 0, making the fit fall back to the pre-RF-aware behavior.
+   */
+  obstructionLossDb?: number;
 }
 
 const GT_SAMPLES_PER_NODE = 1000;

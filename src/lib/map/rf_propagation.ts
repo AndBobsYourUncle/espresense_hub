@@ -57,6 +57,42 @@ export function predictRssi(
   const dy = ty - fy;
   const distance = Math.max(1, Math.hypot(dx, dy));
   const pathLoss = 10 * params.pathLossExponent * Math.log10(distance);
+  const obstruction = obstructionLossDb(
+    fx,
+    fy,
+    tx,
+    ty,
+    walls,
+    params,
+    sourceRoomCentroid,
+  );
+  return params.referenceRssi1m - pathLoss - obstruction;
+}
+
+/**
+ * Total structural attenuation, in dB, along the line from (fx, fy) to
+ * (tx, ty). Sums per-crossing losses for interior walls, exterior walls
+ * (typically ~2.5× interior), and doors (small opening loss). Returns 0
+ * when the source and target are in the same open-plan floor_area or
+ * when no walls intervene.
+ *
+ * This is the per-path "W" term in the path-loss model:
+ *
+ *     expected_rssi = ref_1m − 10·n·log10(d) − W
+ *
+ * Shared with the RF propagation heatmap and with the calibration path,
+ * so the same physics informs both "what should we expect to hear" and
+ * "what residual is the node's own calibration responsible for."
+ */
+export function obstructionLossDb(
+  fx: number,
+  fy: number,
+  tx: number,
+  ty: number,
+  walls: readonly WallSegment[],
+  params: RfParams,
+  sourceRoomCentroid?: readonly [number, number],
+): number {
   const { interior, exterior, doors } = countCrossings(
     fx,
     fy,
@@ -65,9 +101,9 @@ export function predictRssi(
     walls,
     sourceRoomCentroid,
   );
-  const wallLoss =
+  return (
     interior * params.wallAttenuationDb +
-    exterior * params.exteriorWallAttenuationDb;
-  const doorLoss = doors * params.doorAttenuationDb;
-  return params.referenceRssi1m - pathLoss - wallLoss - doorLoss;
+    exterior * params.exteriorWallAttenuationDb +
+    doors * params.doorAttenuationDb
+  );
 }

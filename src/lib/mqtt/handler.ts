@@ -9,6 +9,7 @@ import { getCurrentConfig } from "@/lib/config/current";
 import { buildLocator, computeDevicePosition } from "@/lib/locators";
 import { leaveOneOutResiduals } from "@/lib/locators/calibration";
 import { findRoom } from "@/lib/locators/room_aware";
+import { obstructionLossForPair } from "@/lib/map/rf_cache";
 import { publishPresence } from "@/lib/presence";
 import {
   getStore,
@@ -287,12 +288,25 @@ export function attachHandlers(client: MqttClient): void {
               const parsedAbs = absRaw != null ? parseFloat(absRaw) : NaN;
               const absorptionAtTime =
                 Number.isFinite(parsedAbs) && parsedAbs > 0.1 ? parsedAbs : 2.7;
+              // Structural attenuation between transmitter and listener,
+              // in dB. Subtracted from the observed RSSI's log-distance
+              // during fit so the estimated path-loss exponent isn't
+              // polluted by architectural geometry. 0 when RF cache
+              // isn't built, nodes are on different floors, or the path
+              // crosses no walls.
+              const obstructionLossDb = obstructionLossForPair(
+                match.nodeId,
+                targetId,
+                sourcePoint,
+                targetPoint,
+              );
               const gtSample = {
                 transmitterId: targetId,
                 measured: normalized.distance,
                 trueDist,
                 absorptionAtTime,
                 timestamp: Date.now(),
+                obstructionLossDb,
               };
               recordGroundTruthSample(store, match.nodeId, gtSample);
               // Online per-pair fit update: propagate this single

@@ -4,11 +4,13 @@ import type { Point3D } from "@/lib/map/geometry";
 import { getStore, type DeviceState } from "@/lib/state/store";
 import { BayesianLocator } from "./bayesian";
 import { BFGSLocator } from "./bfgs";
+import { EnvironmentAwareLocator } from "./environment_aware";
 import { MLELocator } from "./mle";
 import { NadarayaWatsonLocator } from "./nadaraya_watson";
 import { NearestNodeLocator } from "./nearest_node";
 import { NelderMeadLocator } from "./nelder_mead";
 import { OutlierRejectingLocator } from "./outlier";
+import { PathAwareLocator } from "./path_aware";
 import { RoomAwareLocator } from "./room_aware";
 import type { Locator, LocatorResult, NodeFix } from "./types";
 
@@ -17,26 +19,33 @@ export type { Locator, LocatorResult, NodeFix } from "./types";
 /**
  * Build the active locator from a Config.
  *
- * Default stack: PathAwareLocator wrapping IDW (Nadaraya-Watson). PathAware
- * iteratively refines positions using per-(listener, transmitter)
- * calibration data we collect from node-to-node observations. When that
- * data isn't available yet (fresh boot, before per-pair fits are computed)
- * it transparently falls back to the base locator's output.
+ * Active locator: **RoomAware**. Uses room-topology to weight pair
+ * contributions (same-room pairs trusted, cross-wall pairs heavily
+ * discounted) and finds position from the weighted centroid of the
+ * pairwise circle-overlap centers. Doesn't consume per-pair calibration
+ * fits — it operates on the firmware's reported distances directly,
+ * with structural weighting on top.
  *
- * Base picker priority:
- *   1. Nadaraya-Watson (IDW) — robust to outliers, default
- *   2. Nelder-Mead — proper least-squares, opt-in via disabling NW in config
+ * Side-by-side alternatives (for comparison view): IDW (Nadaraya-Watson),
+ * Nelder-Mead, BFGS, MLE, NearestNode, PathAware (IDW + per-pair
+ * distance correction), EnvironmentAware (BFGS with forward model
+ * baked in), and optionally Bayesian when `bayesian.enabled` is set.
  *
- * Future: BFGS, MLE will plug in here as additional base options.
+ * PathAware and EnvironmentAware are the two fit-driven locators —
+ * both consume per-pair `n_real` values and try to correct for path
+ * attenuation. They're offered as alternatives rather than the active
+ * locator because RoomAware's topology-based weighting has proven
+ * more robust in practice (no fit bootstrap, no compounding errors
+ * from bad n estimates). Including them here lets the comparison
+ * view show how each approach lines up.
  */
 export interface LocatorBundle {
-  /** The user-facing locator (PathAware wrapping the picked base). */
+  /** The user-facing locator (RoomAware). */
   active: Locator;
   /**
-   * Every base locator we want to compute side-by-side. Each runs on the
-   * raw firmware distances (no PathAware wrap) so the user can see how
-   * different algorithms perform on the same data, and compare them
-   * against the active PathAware result.
+   * Every base locator we want to compute side-by-side on raw firmware
+   * distances, so the UI can compare algorithms against the active
+   * RoomAware result.
    */
   alternatives: Locator[];
 }
@@ -83,7 +92,19 @@ export function buildLocator(config: Config): LocatorBundle {
   // The RoomAware instance is shared: `active` and `bayesian.inner` are
   // the same object, so the second call in the alternatives pass hits a
   // stateless re-solve on the same fixes rather than a separate computation.
-  const allBases: Locator[] = [idw, nm, bfgs, mle, nearest];
+  // PathAware and EnvironmentAware consume per-pair calibration fits to
+  // refine positions. Neither is the active locator — they're included
+  // here so the side-by-side comparison view can show how each fit-
+  // driven approach lines up against RoomAware's topology-only output.
+  // PathAware wraps IDW and iteratively corrects distances; EnvAware
+  // runs BFGS with the forward model baked in. Outlier wrapper applied
+  // so flaky nodes don't drag either solver into the wrong room.
+  const pathAware = new OutlierRejectingLocator(
+    new PathAwareLocator(new NadarayaWatsonLocator()),
+  );
+  const envAware = new OutlierRejectingLocator(new EnvironmentAwareLocator());
+
+  const allBases: Locator[] = [idw, nm, bfgs, mle, nearest, pathAware, envAware];
   if (config.bayesian.enabled) {
     allBases.push(new BayesianLocator(roomAware));
   }

@@ -177,7 +177,20 @@ export function addSampleToPairStats(
       : DEFAULT_N_ASSUMED;
   const logTrue = Math.log(sample.trueDist);
   if (Math.abs(logTrue) < 1e-6) return;
-  const n = (nAssumed * Math.log(sample.measured)) / logTrue;
+  // Structural-loss correction: the per-pair `n_real` should reflect
+  // clutter-driven propagation, not architecture. The only consumer
+  // today is the device-detail diagnostics panel (PathAware is not in
+  // the active locator stack), so there's no live position pipeline
+  // whose distance-correction contract we need to preserve. Pushing
+  // the cleaner value makes the diagnostic more informative and
+  // pre-aligns the data for any future RF-aware locator that reads
+  // per-pair fits.
+  const W =
+    Number.isFinite(sample.obstructionLossDb) && sample.obstructionLossDb != null
+      ? sample.obstructionLossDb
+      : 0;
+  const correctedY = nAssumed * Math.log(sample.measured) - W * LN10_OVER_10;
+  const n = correctedY / logTrue;
   if (!Number.isFinite(n) || n < N_REAL_MIN || n > N_REAL_MAX) return;
 
   decayPairStats(stats, sample.timestamp);
@@ -253,6 +266,24 @@ export function decayStats(stats: LogLogStats, nowMs: number): void {
 const DEFAULT_N_ASSUMED = 2.7;
 
 /**
+ * Converts a dB obstruction loss to the equivalent shift in `y =
+ * n_assumed · ln(d_measured)` space. Derivation:
+ *
+ *     rssi_obs = ref_1m − 10·n_real·log10(d_real) − W          (physics)
+ *     rssi_obs = tx_ref − 10·n_assumed·log10(d_measured)       (firmware)
+ *
+ * Equating and rearranging in natural-log coordinates:
+ *
+ *     n_assumed · ln(d_measured) = log(C) + n_real·ln(d_real) + W·ln(10)/10
+ *
+ * So subtracting `W · LN10_OVER_10` from y before regression factors
+ * out the known structural loss, leaving the fit to explain only
+ * cluttered-propagation effects (path-loss exponent `n_real` + per-node
+ * TX/RX bias in `log(C)`).
+ */
+const LN10_OVER_10 = Math.LN10 / 10;
+
+/**
  * Add one ground-truth sample to the running stats. Applies recency
  * decay first, then accumulates the new sample with unit weight.
  * Silently no-ops on samples whose distances aren't usable for logs.
@@ -280,7 +311,17 @@ export function addSampleToStats(
       : DEFAULT_N_ASSUMED;
   decayStats(stats, sample.timestamp);
   const x = Math.log(sample.trueDist);
-  const y = nAssumed * Math.log(sample.measured);
+  // `y` is the firmware's log-distance in "absorption units." Subtract
+  // the known structural dB loss (converted to the same units via
+  // ln(10)/10) so the regression only has to explain clutter + TX/RX
+  // calibration — not the architecture it's deployed in. Missing or
+  // legacy samples have obstructionLossDb=undefined → W=0 → same math
+  // as before this field existed.
+  const W =
+    Number.isFinite(sample.obstructionLossDb) && sample.obstructionLossDb != null
+      ? sample.obstructionLossDb
+      : 0;
+  const y = nAssumed * Math.log(sample.measured) - W * LN10_OVER_10;
   stats.W += 1;
   stats.Sx += x;
   stats.Sy += y;

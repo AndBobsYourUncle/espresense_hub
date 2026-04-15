@@ -17,6 +17,7 @@ import type { Config } from "@/lib/config";
 import { getCurrentConfig, setCurrentConfig } from "@/lib/config/current";
 import { connectMqtt } from "@/lib/mqtt/client";
 import { attachHandlers } from "@/lib/mqtt/handler";
+import { rebuildRfCache } from "@/lib/map/rf_cache";
 import { loadDevicePins, saveDevicePins } from "@/lib/state/device_persistence";
 import { runDeviceCleanup } from "@/lib/state/device_cleanup";
 import {
@@ -61,6 +62,7 @@ export async function reloadLiveConfig(): Promise<boolean> {
     const config = await loadConfig();
     setCurrentConfig(config);
     applyRuntimeConfig(config);
+    rebuildRfCache(config);
     const store = getStore();
     store.nodeIndex.clear();
     for (const n of config.nodes) {
@@ -133,6 +135,11 @@ export async function bootstrap(): Promise<void> {
     for (const n of config.nodes) {
       if (n.id && n.point) store.nodeIndex.set(n.id, n.point);
     }
+
+    // Build the RF-geometry cache (walls per floor + node-room
+    // centroids) so sample ingest can compute structural attenuation
+    // without recomputing polygon geometry on every MQTT message.
+    rebuildRfCache(config);
 
     // Apply the user's filtering + auto-apply config to the stateful
     // singletons. Same logic the save endpoint re-runs on live-reload.
