@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Floor } from "@/lib/config";
+import type { Floor, Room } from "@/lib/config";
 import {
   type FloorTransform,
+  polygonCentroid,
   tx,
   ty,
 } from "@/lib/map/geometry";
+import { findRoom } from "@/lib/locators/room_aware";
 import { buildWallSegments } from "@/lib/map/rf_geometry";
 import { predictRssi, type RfParams } from "@/lib/map/rf_propagation";
 import { useMapTool } from "./MapToolProvider";
@@ -17,18 +19,26 @@ interface Props {
   nodes: Array<{
     id: string;
     point: readonly [number, number, number];
+    /** Optional explicit room override from config (`nodes[].room`). */
+    room?: string;
   }>;
   rfParams: RfParams;
 }
 
 /**
- * RSSI range used for color mapping. Anything ≥ `MAX_RSSI` renders as
- * the hottest color at full opacity; ≤ `MIN_RSSI` renders fully
- * transparent (undetectable, the device effectively isn't there).
- * Typical BLE devices start losing packets around −90 dBm.
+ * RSSI range used for color mapping. The range is wider than what a
+ * real BLE device would physically receive (−40 is implausibly strong,
+ * −120 is below any noise floor) because the point of the heatmap is
+ * *relative* visualization — we want every cell on the floor to show
+ * *some* color so the gradient shape is legible, even in heavily-walled
+ * zones where the predicted RSSI compounds past practical limits.
+ *
+ * If absolute RSSI interpretation matters (is this actually reachable?),
+ * treat anything below ~−90 dBm as "device probably wouldn't connect"
+ * regardless of the displayed color.
  */
 const MAX_RSSI = -40;
-const MIN_RSSI = -95;
+const MIN_RSSI = -120;
 
 /**
  * Grid resolution in metres per cell. 0.2 m ≈ 8-inch cells — more than
@@ -36,6 +46,15 @@ const MIN_RSSI = -95;
  * the CPU. A 22×18 m floor at this resolution is ~10 000 cells.
  */
 const GRID_CELL_M = 0.2;
+
+/**
+ * Constant fill alpha for every cell (0..255). Full-opacity per-cell
+ * rendering; overall translucency is controlled by the outer `opacity`
+ * CSS on the `<image>` element so room labels and walls stay visible
+ * beneath the heatmap. Kept constant rather than ramping with signal
+ * strength so weak-signal regions stay visibly colored.
+ */
+const CELL_ALPHA = 255;
 
 /**
  * RF propagation overlay — renders a predicted-RSSI heatmap for the
@@ -62,6 +81,39 @@ export default function RfPropagationOverlay({
     if (!inspectedNodeId) return null;
     return nodes.find((n) => n.id === inspectedNodeId) ?? null;
   }, [inspectedNodeId, nodes]);
+
+  /**
+   * Centroid of the selected node's assigned room. Priority order:
+   *
+   *   1. Explicit `room:` override from config — the user's ground truth.
+   *   2. Point-in-polygon for the node's (x, y) — best fit when the node
+   *      isn't exactly on a wall.
+   *   3. `null` — node's room is unknown; countCrossings will fall back
+   *      to "always skip walls at source" (pre-side-test behavior).
+   *
+   * The centroid defines "interior side" of any wall the node sits on,
+   * letting countCrossings distinguish signal going *into* the room
+   * (no mount-wall attenuation) from signal going *across* the mount
+   * wall into a different room (legitimate attenuation).
+   */
+  const sourceRoomCentroid = useMemo((): readonly [number, number] | null => {
+    if (!selected) return null;
+    const resolveRoomId = (label: string | undefined): Room | null => {
+      if (!label) return null;
+      return (
+        floor.rooms.find(
+          (r) => r.id === label || r.name === label,
+        ) ?? null
+      );
+    };
+    let room: Room | null = resolveRoomId(selected.room);
+    if (!room) {
+      const id = findRoom(floor.rooms, [selected.point[0], selected.point[1]]);
+      room = id ? resolveRoomId(id) : null;
+    }
+    if (!room?.points) return null;
+    return polygonCentroid(room.points);
+  }, [selected, floor]);
 
   useEffect(() => {
     if (activeTool !== "rf-propagation" || !selected) {
@@ -90,7 +142,15 @@ export default function RfPropagationOverlay({
         // Cell-center position in config-space.
         const x = transform.bounds.minX + (i + 0.5) * GRID_CELL_M;
         const y = transform.bounds.minY + (j + 0.5) * GRID_CELL_M;
-        const rssi = predictRssi(sx, sy, x, y, walls, rfParams);
+        const rssi = predictRssi(
+          sx,
+          sy,
+          x,
+          y,
+          walls,
+          rfParams,
+          sourceRoomCentroid ?? undefined,
+        );
         const [r, g, b, a] = rssiToRgba(rssi);
         // Rows in imageData go top-to-bottom in pixel-space. Our
         // config-space y increases upward; the parent SVG's flipY
@@ -105,7 +165,7 @@ export default function RfPropagationOverlay({
     }
     ctx.putImageData(img, 0, 0);
     setDataUrl(canvas.toDataURL("image/png"));
-  }, [activeTool, selected, transform, walls, rfParams]);
+  }, [activeTool, selected, transform, walls, rfParams, sourceRoomCentroid]);
 
   if (activeTool !== "rf-propagation" || !selected || !dataUrl) return null;
 
@@ -137,7 +197,7 @@ export default function RfPropagationOverlay({
         height={height}
         preserveAspectRatio="none"
         transform={`translate(0 ${translateY}) scale(1 ${scaleY})`}
-        style={{ opacity: 0.65, imageRendering: "auto" }}
+        style={{ opacity: 0.85, imageRendering: "auto" }}
       />
       {/* Highlight the selected node */}
       <circle
@@ -159,11 +219,8 @@ export default function RfPropagationOverlay({
  * (weak) → teal → yellow → white-ish (strong).
  */
 function rssiToRgba(rssi: number): [number, number, number, number] {
-  if (rssi <= MIN_RSSI) return [0, 0, 0, 0];
   const t = Math.max(0, Math.min(1, (rssi - MIN_RSSI) / (MAX_RSSI - MIN_RSSI)));
-  // Five-stop gradient keyed to t ∈ [0, 1]. Colors picked from a
-  // rough viridis palette with the low end shifted toward cool so the
-  // "barely detectable" regions read as dim purple.
+  // Five-stop viridis-ish gradient keyed to t ∈ [0, 1].
   const stops: Array<[number, [number, number, number]]> = [
     [0.0, [68, 1, 84]], //   dark purple
     [0.25, [59, 82, 139]],
@@ -179,11 +236,8 @@ function rssiToRgba(rssi: number): [number, number, number, number] {
       const r = Math.round(c0[0] + f * (c1[0] - c0[0]));
       const g = Math.round(c0[1] + f * (c1[1] - c0[1]));
       const b = Math.round(c0[2] + f * (c1[2] - c0[2]));
-      // Alpha also ramps with strength — weakest signals nearly
-      // invisible, strongest fully opaque.
-      const alpha = Math.round(Math.max(0, Math.min(1, t * 1.2)) * 255);
-      return [r, g, b, alpha];
+      return [r, g, b, CELL_ALPHA];
     }
   }
-  return [253, 231, 37, 255];
+  return [253, 231, 37, CELL_ALPHA];
 }

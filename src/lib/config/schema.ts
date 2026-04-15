@@ -93,10 +93,25 @@ export const RfSchema = z
      */
     path_loss_exponent: z.number().positive().default(3.0),
     /**
-     * Attenuation per wall crossed (dB). Typical drywall is ~3–5 dB
-     * at 2.4 GHz; brick or concrete is 8–15 dB. Default 4 dB.
+     * Attenuation per INTERIOR wall crossed (dB). Typical drywall is
+     * ~3–5 dB at 2.4 GHz. Default 4 dB.
      */
     wall_attenuation_db: z.number().min(0).default(4.0),
+    /**
+     * Attenuation per EXTERIOR wall crossed (dB). Exterior walls are
+     * auto-detected as polygon edges declared by only one room — the
+     * other side is unmapped space (outside the home). Typical
+     * exterior construction attenuates much more than drywall:
+     * brick/stucco with insulation runs 8–15 dB at 2.4 GHz, concrete
+     * 15–30 dB. Default 10 dB.
+     *
+     * Separating this from `wall_attenuation_db` matters for the
+     * heatmap visualization (exterior walls produce visible shadows
+     * while interior walls are subtle) AND for future RoomAware /
+     * calibration work where "how obstructed is this signal path"
+     * weighs on trust.
+     */
+    exterior_wall_attenuation_db: z.number().min(0).default(10.0),
     /**
      * Attenuation per door/opening crossed (dB). Open doorways and
      * archways have essentially no attenuation (0 dB); a closed

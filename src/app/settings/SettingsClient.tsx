@@ -1135,12 +1135,26 @@ function MapTab({ doc, setField }: DocProps) {
         />
       </Field>
       <Field
-        label="Wall attenuation"
-        hint="Signal loss per wall crossed (dB). Typical drywall ≈ 3–5 dB at 2.4 GHz; brick or concrete 8–15 dB. Default 4."
+        label="Interior wall attenuation"
+        hint="Signal loss per interior wall crossed (dB). Interior walls are any polygon edges shared by two rooms. Typical drywall ≈ 3–5 dB at 2.4 GHz. Default 4."
       >
         <NumberInput
           value={get<number>(doc, ["rf", "wall_attenuation_db"], 4.0)}
           onChange={(v) => setField(["rf", "wall_attenuation_db"], v)}
+          step={0.5}
+          min={0}
+          unit="dB"
+        />
+      </Field>
+      <Field
+        label="Exterior wall attenuation"
+        hint="Signal loss per exterior wall crossed (dB). Auto-detected: any polygon edge declared by only one room is treated as exterior (other side is unmapped = outside the home). Typical residential exterior construction ≈ 8–15 dB for brick/stucco + insulation; concrete 15–30 dB. Default 10."
+      >
+        <NumberInput
+          value={get<number>(doc, ["rf", "exterior_wall_attenuation_db"], 10.0)}
+          onChange={(v) =>
+            setField(["rf", "exterior_wall_attenuation_db"], v)
+          }
           step={0.5}
           min={0}
           unit="dB"

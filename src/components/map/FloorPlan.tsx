@@ -163,13 +163,17 @@ export default function FloorPlan({ config, floor }: Props) {
       <RfPropagationOverlay
         floor={floor}
         transform={transform}
-        nodes={floorNodes
-          .filter((n): n is NodeMarkerData & { id: string } => !!n.id)
-          .map((n) => ({ id: n.id, point: n.point }))}
+        nodes={config.nodes
+          .filter(
+            (n): n is typeof n & { id: string; point: readonly [number, number, number] } =>
+              Boolean(n.id && n.point),
+          )
+          .map((n) => ({ id: n.id, point: n.point, room: n.room }))}
         rfParams={{
           referenceRssi1m: config.rf.reference_rssi_1m,
           pathLossExponent: config.rf.path_loss_exponent,
           wallAttenuationDb: config.rf.wall_attenuation_db,
+          exteriorWallAttenuationDb: config.rf.exterior_wall_attenuation_db,
           doorAttenuationDb: config.rf.door_attenuation_db,
         }}
       />
