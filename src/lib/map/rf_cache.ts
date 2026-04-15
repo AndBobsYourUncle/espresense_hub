@@ -58,6 +58,41 @@ export function rebuildRfCache(config: Config): void {
 }
 
 /**
+ * Build a closure that returns dB obstruction loss from `node` (acting
+ * as the source for the wall-at-source side test) to an arbitrary
+ * (px, py) target. Use this when scoring many candidate positions
+ * against the same node — locators iterate hundreds of candidates per
+ * fix, and threading the per-node walls/centroid lookups outside the
+ * inner loop saves real work.
+ *
+ * Returns `null` when the cache isn't built or the node isn't in the
+ * cache; callers should treat that as "no obstruction info available"
+ * (typically: weight uniformly).
+ */
+export function buildObstructionFn(
+  nodeId: string,
+  nodePoint: readonly [number, number],
+): ((px: number, py: number) => number) | null {
+  if (!cache) return null;
+  const floorId = cache.nodeFloor.get(nodeId);
+  if (!floorId) return null;
+  const walls = cache.wallsByFloor.get(floorId);
+  if (!walls) return null;
+  const centroid = cache.nodeRoomCentroid.get(nodeId);
+  const params = cache.params;
+  return (px, py) =>
+    obstructionLossDb(
+      nodePoint[0],
+      nodePoint[1],
+      px,
+      py,
+      walls,
+      params,
+      centroid,
+    );
+}
+
+/**
  * Compute obstruction loss (dB) along the line between two configured
  * nodes. Returns 0 when:
  *   - cache isn't built yet (pre-bootstrap)

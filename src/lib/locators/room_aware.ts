@@ -329,7 +329,7 @@ export class RoomAwareLocator implements Locator {
 
 // ─── Circle overlap computation ─────────────────────────────────────────
 
-interface OverlapCenter {
+export interface OverlapCenter {
   /** Candidate position — one of the two ACTUAL intersection points
    *  of the two circles (not the lens midpoint). Each pair produces
    *  TWO candidates; we add both and let scoring pick the winner. */
@@ -341,7 +341,7 @@ interface OverlapCenter {
   gdop: number;
 }
 
-function computeAllOverlaps(fixes: readonly NodeFix[]): OverlapCenter[] {
+export function computeAllOverlaps(fixes: readonly NodeFix[]): OverlapCenter[] {
   const overlaps: OverlapCenter[] = [];
   for (let i = 0; i < fixes.length; i++) {
     for (let j = i + 1; j < fixes.length; j++) {

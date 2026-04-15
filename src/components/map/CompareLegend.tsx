@@ -12,7 +12,11 @@ import { useMapTool } from "./MapToolProvider";
  * default. Everything else is considered a debug alternative and hidden
  * until the user clicks "show all" or toggles individually.
  */
-const PRIMARY_LOCATORS = new Set(["room_aware", "bayesian"]);
+const PRIMARY_LOCATORS = new Set([
+  "room_aware",
+  "bayesian",
+  "rf_room_aware",
+]);
 
 const DEBUG_LOCATORS = [
   "nadaraya_watson",
@@ -66,6 +70,9 @@ export default function CompareLegend() {
   const primaryEntries: Entry[] = [
     buildEntry(ACTIVE, `${LOCATOR_LABELS[ACTIVE]} (active)`),
   ];
+  if (live.liveKeys.has("rf_room_aware")) {
+    primaryEntries.push(buildEntry("rf_room_aware"));
+  }
   if (live.liveKeys.has("bayesian")) {
     primaryEntries.push(buildEntry("bayesian"));
   }

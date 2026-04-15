@@ -11,6 +11,7 @@ import { NearestNodeLocator } from "./nearest_node";
 import { NelderMeadLocator } from "./nelder_mead";
 import { OutlierRejectingLocator } from "./outlier";
 import { PathAwareLocator } from "./path_aware";
+import { RfRoomAwareLocator } from "./rf_room_aware";
 import { RoomAwareLocator } from "./room_aware";
 import type { Locator, LocatorResult, NodeFix } from "./types";
 
@@ -104,7 +105,22 @@ export function buildLocator(config: Config): LocatorBundle {
   );
   const envAware = new OutlierRejectingLocator(new EnvironmentAwareLocator());
 
-  const allBases: Locator[] = [idw, nm, bfgs, mle, nearest, pathAware, envAware];
+  // RF-aware version of RoomAware. Uses the RF map's continuous
+  // attenuation to weight cross-room circle overlaps instead of the
+  // ternary 1.0/0.8/0.005. Compared side-by-side here so the user can
+  // verify it before promoting it to the active locator.
+  const rfRoomAware = new OutlierRejectingLocator(new RfRoomAwareLocator());
+
+  const allBases: Locator[] = [
+    idw,
+    nm,
+    bfgs,
+    mle,
+    nearest,
+    pathAware,
+    envAware,
+    rfRoomAware,
+  ];
   if (config.bayesian.enabled) {
     allBases.push(new BayesianLocator(roomAware));
   }
