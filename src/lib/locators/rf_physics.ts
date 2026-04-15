@@ -66,12 +66,27 @@ const REL_TOL = 0.15;
 
 /**
  * Asymmetric weighting in dB-space residuals (predicted − observed).
- * Positive residuals are common when the RF model under-predicts
- * attenuation; negative residuals only happen when the candidate is
- * too far from the node.
+ *
+ * Distance-space asymmetry (used by RfRoomAware) flips sign in dB:
+ *
+ *   residual > 0 (predicted RSSI > observed): signal weaker than
+ *     model predicts. Either candidate too close (rare) or model
+ *     under-predicts attenuation (typical — multipath/body-shadow
+ *     add real loss the wall map doesn't capture). Mostly OK,
+ *     LIGHT penalty.
+ *
+ *   residual < 0 (predicted < observed): signal stronger than
+ *     model predicts. The model basically can't UNDER-predict
+ *     signal strength (negative attenuation isn't a thing), so the
+ *     only physical explanation is the candidate is too far from
+ *     the node. HEAVY penalty.
+ *
+ * Naming reflects role (heavy/light) not residual sign, to avoid
+ * the confusion of "OVER means residual > 0 means heavier" that
+ * caused an earlier sign-flip bug.
  */
-const ASYM_OVER_WEIGHT = 1.0;
-const ASYM_UNDER_WEIGHT = 0.15;
+const ASYM_HEAVY_WEIGHT = 1.0;
+const ASYM_LIGHT_WEIGHT = 0.15;
 
 /**
  * Huber inflection in dB. BLE RSSI noise is ~5–10 dB at the per-
@@ -306,7 +321,12 @@ export class RfPhysicsLocator implements Locator {
             ? 0.5 * residualDb * residualDb
             : HUBER_DELTA_DB * (absR - 0.5 * HUBER_DELTA_DB);
 
-        const dirWeight = residualDb > 0 ? ASYM_OVER_WEIGHT : ASYM_UNDER_WEIGHT;
+        // residual < 0 = candidate too far (heavy); residual > 0 = OK
+        // (model under-attenuates is the typical reason). Note this
+        // is the OPPOSITE convention from distance-space residuals
+        // because the dB sign flips when you go from distance →
+        // log-distance/RSSI.
+        const dirWeight = residualDb < 0 ? ASYM_HEAVY_WEIGHT : ASYM_LIGHT_WEIGHT;
         const coh = rfActive ? Math.exp(-W / RF_WEIGHT_SCALE_DB) : 1;
         sum += coh * dirWeight * lossR;
       }
