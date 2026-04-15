@@ -18,52 +18,49 @@ import type { Locator, LocatorResult, NodeFix } from "./types";
  * trilateration-style Nelder-Mead. Geometry is the primary signal;
  * RF is a secondary trust modifier.
  *
- * RfPhysics inverts that priority: the RF model becomes the primary
- * signal. Instead of "minimize distance residuals," it minimizes
- * **dB-space residuals between predicted and observed RSSI**, where:
+ * RfPhysics extends that by using the RF model to **pre-adjust the
+ * measurements themselves** before trilateration. For each fix:
  *
- *     predicted_rssi(p, node) = ref_1m
- *                             − 10·n_path · log10(|p − node|)
- *                             − W(p, node)
+ *     measured_adjusted = measured / 10^(W(p, node) / (10·a_n))
  *
- *     observed_rssi(node)     = tx_ref − 10·a_n · log10(measured)
+ * This strips the model-predicted wall attenuation out of the
+ * firmware-reported distance, leaving (approximately) the true
+ * geometric distance plus whatever attenuation the model didn't
+ * capture. Asymmetric distance-space NM then converges to a
+ * position that's geometrically consistent with the corrected
+ * distances.
  *
- * For a candidate position p to fit, the model's predicted RSSI at p
- * must match what the firmware actually saw — which means the walls
- * the candidate sits behind, in front of, etc. must explain the
- * measurements. A position in the wrong room has wrong walls →
- * predicted RSSI doesn't match observed → optimizer rejects it.
+ * Why this rather than dB-space residuals: a previous iteration
+ * minimized `predicted_rssi - observed_rssi` directly. That's
+ * theoretically cleaner but requires the RF model to be very
+ * accurate — when the model under-predicts wall loss by 5–15 dB
+ * (typical, since multipath / body shadow / fading add real loss the
+ * configured walls don't see), the dB-space optimizer is
+ * systematically biased to push positions away from nodes to
+ * compensate. The measured-distance correction approach degrades
+ * gracefully: if W is correct, measured_adjusted = true distance and
+ * fit is perfect; if W under-predicts, measured_adjusted is still
+ * larger than true but the asymmetric loss handles that exactly the
+ * way RfRoomAware does today.
  *
  * Differences from RfRoomAware:
  *
- *   1. **Objective is dB-space, not distance-space**. RSSI noise is
- *      more Gaussian in dB, walls add linearly, the squared loss is
- *      better-justified statistically.
+ *   1. **Pre-adjusted measurements** (above) — RfRoomAware fits raw
+ *      measured distances; RfPhysics fits measured-with-walls-removed.
+ *      In well-modeled paths the corrected distance is closer to
+ *      truth, so NM converges tighter.
  *
- *   2. **W is part of the objective, not just the weighting.** The
- *      structure of the building (walls, doors, exterior) directly
- *      determines what positions are plausible. Wall-hugging
- *      ambiguity is resolved by the model itself.
+ *   2. **Per-fix RF coherence weighting.** Fixes from nodes with
+ *      heavy attenuation to the candidate are trusted less — noisier
+ *      paths contribute less to the position estimate.
  *
- *   3. **Per-fix RF coherence weighting.** Fixes from nodes with
- *      heavy attenuation to the candidate are trusted less in the
- *      objective — they're noisier, contribute less to the position
- *      estimate.
- *
- *   4. **Seed selection by physics fit, not just RF score.** After
+ *   3. **Seed selection by physics fit, not just RF score.** After
  *      RF-coherence scoring, evaluate the top candidates against the
  *      physics objective and pick the one with lowest residual as
- *      the NM seed. Picks the seed that NM is most likely to refine
- *      well, instead of the one that just had the best per-pair
- *      score.
+ *      the NM seed.
  *
- * Trade-off: brittle to RF model errors. If a wall is mis-attenuated
- * by 4 dB, positions near that wall get systematically biased. After
- * the calibration fit work that landed wall=2.21, ext=4.14, the
- * model is plausible enough to drive the locator directly.
- *
- * Falls back to a pure-trilateration NM (no W in objective) when the
- * RF cache isn't built yet — degraded but functional.
+ * Falls back to RfRoomAware-equivalent behavior (no measurement
+ * adjustment) when the RF cache isn't built yet.
  */
 
 /**
@@ -84,26 +81,25 @@ const CLOSEST_PRIOR_MAX_DIST_M = 6;
 const REL_TOL = 0.15;
 
 /**
- * Asymmetric weighting in the dB-space objective. residual_dB > 0
- * means observed RSSI was *stronger* than the RF model predicted —
- * suggests the candidate position is too far (or in the wrong place
- * such that fewer walls intervene than reality). Heavy penalty.
+ * Asymmetric weighting in the distance-space objective on
+ * RF-corrected measurements. Same semantics as RfRoomAware:
  *
- * residual_dB < 0 means observed was *weaker* than predicted, which
- * could happen with multipath, body shadow, or unmodeled
- * obstructions on top of what the RF map captures. Light penalty —
- * we don't punish positions for the model's incompleteness.
+ *   residual = calc - measured_adjusted
+ *
+ *   residual > 0 (calc > adjusted): candidate is FARTHER from node
+ *     than the corrected measurement says. Violates the upper-bound
+ *     intuition (corrected ≈ true_distance after stripping known
+ *     walls). Heavy penalty.
+ *
+ *   residual < 0 (calc < adjusted): candidate is CLOSER. Possible
+ *     when the model under-predicted W (real attenuation > model).
+ *     Light penalty.
  */
 const ASYM_OVER_WEIGHT = 1.0;
-const ASYM_UNDER_WEIGHT = 0.15;
+const ASYM_UNDER_WEIGHT = 0.1;
 
-/**
- * Huber inflection in dB-space. BLE RSSI noise is typically 5–10 dB,
- * so we set δ to 8 dB — quadratic for typical noise, linear for
- * larger excursions (one heavy-multipath measurement doesn't
- * dominate the fit).
- */
-const HUBER_DELTA_DB = 8;
+/** Huber inflection in distance-space (meters). Same as RfRoomAware. */
+const HUBER_DELTA = 1.5;
 
 /** Number of top RF-scored candidates to evaluate against the physics
  *  objective when picking the seed. More = better seed but more compute. */
@@ -287,16 +283,25 @@ export class RfPhysicsLocator implements Locator {
     }
     if (scored.length === 0) return fallbackIDW(fixes, this.name);
 
-    // ── Stage 2: physics-driven NM objective ──
+    // ── Stage 2: distance-space NM with RF-corrected measurements ──
     //
-    // residual_dB(p, node) = observed_rssi - predicted_rssi_at_p
-    //                      = 10·n_path·log10(|p−node|) - 10·a_n·log10(measured) + W(p, node)
+    // For each fix, strip the model-predicted wall loss out of the
+    // firmware-reported distance:
     //
-    // (assuming tx_ref ≈ ref_1m, dropping the constant)
+    //   measured_adjusted = measured / 10^(W(p, node) / (10·a_n))
     //
-    // Minimize Σ w · ρ(residual_dB) where:
-    //   - ρ = asymmetric Huber (over heavier than under)
-    //   - w  = (1/d²) × exp(-W/scale)  [reliability + RF coherence]
+    // then minimize the asymmetric Huber residual
+    //   r = calc - measured_adjusted
+    // (over-residuals heavily penalized; under-residuals lightly,
+    // accepting that the model may under-predict W).
+    //
+    // Per-fix coherence weighting: fixes from heavily-obstructed
+    // paths are noisier; trust them less.
+    //
+    // Note that W (and thus measured_adjusted) is recomputed at every
+    // NM step because it depends on the candidate position. That's
+    // the point — the RF map participates in defining the objective
+    // throughout the optimization.
     const objective = (p: [number, number]): number => {
       let sum = 0;
       for (const f of fixes) {
@@ -308,24 +313,29 @@ export class RfPhysicsLocator implements Locator {
         const W = rfActive ? wAt(f.nodeId, p[0], p[1]) : 0;
         const aN = absFor(f.nodeId);
 
-        // Residual in dB. Positive when |p−node| is too large
-        // (candidate too far), negative when too small.
-        const residualDb =
-          10 * nPath * Math.log10(calc) -
-          10 * aN * Math.log10(f.distance) +
-          W;
+        // Strip model-predicted wall loss from the firmware reading.
+        // For a path the model captures correctly, adjusted ≈ true
+        // distance. For an under-modeled path, adjusted is still
+        // bigger than true but only by the unmodeled portion.
+        const measuredAdjusted =
+          f.distance / Math.pow(10, W / (10 * aN));
 
-        const absR = Math.abs(residualDb);
+        const r = calc - measuredAdjusted;
+        const absR = Math.abs(r);
         const lossR =
-          absR <= HUBER_DELTA_DB
-            ? 0.5 * residualDb * residualDb
-            : HUBER_DELTA_DB * (absR - 0.5 * HUBER_DELTA_DB);
+          absR <= HUBER_DELTA
+            ? 0.5 * r * r
+            : HUBER_DELTA * (absR - 0.5 * HUBER_DELTA);
 
-        const dirWeight = residualDb > 0 ? ASYM_OVER_WEIGHT : ASYM_UNDER_WEIGHT;
+        const dirWeight = r > 0 ? ASYM_OVER_WEIGHT : ASYM_UNDER_WEIGHT;
         // Per-fix weighting: closer and less-obstructed → more reliable.
+        // Weight uses the *original* measured distance for the 1/d²
+        // baseline (closer fixes are intrinsically more reliable
+        // regardless of model corrections); the RF coherence factor
+        // is independent.
         const baseW = 1 / (f.distance * f.distance + 1e-6);
         const coh = rfActive
-          ? Math.exp(-wAt(f.nodeId, p[0], p[1]) / RF_WEIGHT_SCALE_DB)
+          ? Math.exp(-W / RF_WEIGHT_SCALE_DB)
           : 1;
         sum += baseW * coh * dirWeight * lossR;
       }
@@ -374,10 +384,9 @@ export class RfPhysicsLocator implements Locator {
       zt += w;
     }
 
-    // Confidence: how well does the physics model explain the
-    // measurements at the converged position? High agreement → high
-    // confidence. Calculated as fraction of fixes whose dB residual
-    // is within typical BLE noise (8 dB).
+    // Confidence: fraction of fixes whose RF-corrected distance is
+    // close to |p − node|, weighted by RF coherence. High agreement →
+    // high confidence.
     let agreeNum = 0;
     let totalDen = 0;
     for (const f of fixes) {
@@ -387,15 +396,11 @@ export class RfPhysicsLocator implements Locator {
       if (calc < 0.1) continue;
       const W = rfActive ? wAt(f.nodeId, posX, posY) : 0;
       const aN = absFor(f.nodeId);
-      const residualDb =
-        10 * nPath * Math.log10(calc) -
-        10 * aN * Math.log10(f.distance) +
-        W;
-      const coh = rfActive
-        ? Math.exp(-wAt(f.nodeId, posX, posY) / RF_WEIGHT_SCALE_DB)
-        : 1;
+      const measuredAdjusted =
+        f.distance / Math.pow(10, W / (10 * aN));
+      const coh = rfActive ? Math.exp(-W / RF_WEIGHT_SCALE_DB) : 1;
       totalDen += coh;
-      if (Math.abs(residualDb) < HUBER_DELTA_DB) agreeNum += coh;
+      if (Math.abs(calc - measuredAdjusted) < HUBER_DELTA) agreeNum += coh;
     }
     const agreeRatio = totalDen > 0 ? agreeNum / totalDen : 0;
     const fixScore = Math.min(1, fixes.length / 6);
