@@ -20,6 +20,8 @@ const DEBUG_LOCATORS = [
   "bfgs",
   "mle",
   "nearest_node",
+  "path_aware",
+  "environment_aware",
   "upstream_companion",
 ];
 

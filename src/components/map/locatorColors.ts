@@ -12,6 +12,8 @@ export const LOCATOR_COLORS: Record<string, string> = {
   nearest_node: "#fbbf24", // amber-400
   room_aware: "#f97316", // orange-500 (the active marker)
   bayesian: "#6366f1", // indigo-500 — distinct from violet (IDW) and cyan (NM)
+  path_aware: "#f87171", // red-400 — fit-driven distance correction
+  environment_aware: "#2dd4bf", // teal-400 — forward-model BFGS
   upstream_companion: "#64748b", // slate-500 — neutral, signals "external reference"
 };
 
@@ -23,6 +25,8 @@ export const LOCATOR_LABELS: Record<string, string> = {
   nearest_node: "Nearest",
   room_aware: "Room-Aware",
   bayesian: "Bayesian",
+  path_aware: "Path-Aware",
+  environment_aware: "Env-Aware",
   upstream_companion: "ESP-Companion",
 };
 
