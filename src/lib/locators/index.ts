@@ -206,6 +206,10 @@ export function computeDevicePosition(
       point,
       distance,
       distanceVariance: m.distanceVariance,
+      // Pass the raw firmware-reported RSSI through unchanged.
+      // RfPhysics and other RSSI-aware locators use it directly to
+      // bypass firmware's absorption-based distance conversion.
+      rssi: m.rssi,
     });
   }
 

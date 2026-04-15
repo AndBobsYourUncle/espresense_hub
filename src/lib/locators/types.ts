@@ -12,6 +12,16 @@ export interface NodeFix {
    * data yet" — treat as average reliability.
    */
   distanceVariance?: number;
+  /**
+   * Raw RSSI in dBm as reported by firmware (before its absorption-
+   * based distance conversion). Optional because legacy paths /
+   * tests construct fixes without it; locators that need RSSI
+   * should fall back when undefined. Most locators use `distance`
+   * (the firmware-converted value) instead — RSSI is for locators
+   * that want to bypass firmware's conversion (e.g. RfPhysics) and
+   * apply their own propagation model directly.
+   */
+  rssi?: number;
 }
 
 /** Output of a locator algorithm. */
