@@ -311,17 +311,20 @@ export function addSampleToStats(
       : DEFAULT_N_ASSUMED;
   decayStats(stats, sample.timestamp);
   const x = Math.log(sample.trueDist);
-  // `y` is the firmware's log-distance in "absorption units." Subtract
-  // the known structural dB loss (converted to the same units via
-  // ln(10)/10) so the regression only has to explain clutter + TX/RX
-  // calibration — not the architecture it's deployed in. Missing or
-  // legacy samples have obstructionLossDb=undefined → W=0 → same math
-  // as before this field existed.
-  const W =
-    Number.isFinite(sample.obstructionLossDb) && sample.obstructionLossDb != null
-      ? sample.obstructionLossDb
-      : 0;
-  const y = nAssumed * Math.log(sample.measured) - W * LN10_OVER_10;
+  // Per-LISTENER fit: `y` is the firmware's log-distance in "absorption
+  // units." Intentionally does NOT subtract the structural-loss term W
+  // — firmware has no geometric awareness, so its absorption setting
+  // must be the path-loss exponent it effectively sees, walls and all.
+  // Factoring W out here and auto-applying the cleaner value makes
+  // firmware systematically overestimate distance on walled paths
+  // (confirmed empirically: dropping push values from ~4.0 to ~2.8
+  // blew up device positions on a home with drywall-heavy geometry).
+  //
+  // The per-pair fit DOES subtract W — its consumers (PathAware,
+  // EnvironmentAware, diagnostics) have geometry and can apply the
+  // correction at the device estimate, not the listener-neighborhood
+  // average.
+  const y = nAssumed * Math.log(sample.measured);
   stats.W += 1;
   stats.Sx += x;
   stats.Sy += y;

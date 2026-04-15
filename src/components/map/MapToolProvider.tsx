@@ -86,6 +86,8 @@ export default function MapToolProvider({
       "bfgs",
       "mle",
       "nearest_node",
+      "path_aware",
+      "environment_aware",
       "upstream_companion",
     ]),
   );
