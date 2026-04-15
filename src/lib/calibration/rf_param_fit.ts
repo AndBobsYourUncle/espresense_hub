@@ -84,6 +84,37 @@ const MAX_N = 8;
 const MAX_ATT_DB = 30;
 
 /**
+ * Ridge prior toward physically plausible RF-model defaults. Without
+ * regularization, the unweighted OLS finds degenerate solutions where
+ * the path-loss exponent absorbs the wall effect (more distance vs.
+ * one extra wall is statistically near-equivalent on this dataset
+ * since long paths usually cross more walls — collinear). The result
+ * is non-physical (e.g. "exterior walls attenuate 1 dB") and the
+ * model can't distinguish open from walled paths anymore.
+ *
+ * Each entry is `[prior_mean, strength]`. `strength` is in the same
+ * units as the design matrix's diagonal entries (sum of weighted
+ * x²) — interpreted as "equivalent observations of zero-residual at
+ * the prior." With per-pair weighting normalizing each pair to total
+ * weight 1, the design-matrix diagonals scale with the count of
+ * pairs. Setting strengths in single-digit units means the prior is
+ * worth a handful of pairs' worth of evidence — strong enough to
+ * break ties, weak enough that real signal overrides it.
+ *
+ * Indices match the column order of X:
+ *   0 = path_loss_exponent (10·log10(d) coefficient)
+ *   1 = wall_attenuation_db (per interior crossing)
+ *   2 = exterior_wall_attenuation_db (per exterior crossing)
+ *   3 = door_attenuation_db (per door crossing)
+ */
+const PRIORS: ReadonlyArray<{ mean: number; strength: number }> = [
+  { mean: 3.0, strength: 2 }, // n: weakly anchored — this is the most data-driven
+  { mean: 4.0, strength: 4 }, // wall: moderately anchored — drywall is well-known
+  { mean: 10.0, strength: 8 }, // exterior: strongly anchored — exterior walls definitely > 1 dB
+  { mean: 0.0, strength: 12 }, // door: strongly anchored at 0 — most "doors" are gaps with negligible loss
+];
+
+/**
  * Run the fit using the live store's sample buffers and the supplied
  * config (for walls and node positions). Returns null when there
  * aren't enough samples or the regression matrix is singular.
@@ -126,10 +157,13 @@ export function fitRfParametersFromStore(
     }
   }
 
-  // Build the regression matrix. Each row contributes:
-  //   [10·log10(trueDist), interior, exterior, doors]  →  10·absorption·log10(measured)
-  const X: number[][] = [];
-  const y: number[] = [];
+  // Bucket samples by (listener, transmitter) pair so we can normalize
+  // each pair to equal total weight downstream — without this, pairs
+  // with thousands of samples (close-range, high-traffic) drown out
+  // pairs with dozens (long-range, wall-heavy), and the wall-heavy
+  // signal that's most informative about attenuation gets crowded out.
+  type Row = { x: number[]; y: number };
+  const byPair = new Map<string, Row[]>();
 
   for (const [listenerId, samples] of store.nodeGroundTruthSamples) {
     const lFloor = nodeFloor.get(listenerId);
@@ -156,75 +190,125 @@ export function fitRfParametersFromStore(
         txCentroid,
       );
 
-      const yi = 10 * s.absorptionAtTime * Math.log10(s.measured);
-      const xi = [
-        10 * Math.log10(s.trueDist),
-        interior,
-        exterior,
-        doors,
-      ];
-      X.push(xi);
-      y.push(yi);
+      const row: Row = {
+        x: [10 * Math.log10(s.trueDist), interior, exterior, doors],
+        y: 10 * s.absorptionAtTime * Math.log10(s.measured),
+      };
+      const key = `${listenerId}|${s.transmitterId}`;
+      let bucket = byPair.get(key);
+      if (!bucket) {
+        bucket = [];
+        byPair.set(key, bucket);
+      }
+      bucket.push(row);
     }
   }
 
-  if (X.length < 20) return null; // Need a meaningful sample size.
+  // Flatten with per-pair weight = 1/bucket_size so each pair
+  // contributes total weight 1. Total problem weight = #pairs, which
+  // makes the ridge `strength` parameters interpretable as fractions
+  // of "the whole dataset."
+  const X: number[][] = [];
+  const y: number[] = [];
+  const w: number[] = [];
+  for (const bucket of byPair.values()) {
+    const wi = 1 / bucket.length;
+    for (const row of bucket) {
+      X.push(row.x);
+      y.push(row.y);
+      w.push(wi);
+    }
+  }
 
-  return solveOls(X, y);
+  if (byPair.size < 10) return null; // Need at least 10 distinct pairs.
+
+  return solveRidgeWLS(X, y, w);
 }
 
 /**
- * Closed-form OLS via the normal equations β = (XᵀX)⁻¹ Xᵀy. Fine for
- * a 4-parameter problem with a few thousand rows — no need for
- * iterative solvers. Returns null when the design matrix is singular
- * (e.g., all samples have the same wall configuration).
+ * Closed-form weighted ridge regression with non-zero priors. Solves
+ *
+ *     β̂ = (XᵀWX + Λ)⁻¹ (XᵀWy + Λ·β₀)
+ *
+ * where W is the diagonal weight matrix, Λ is the diagonal ridge
+ * matrix from PRIORS[*].strength, and β₀ is the prior-mean vector
+ * from PRIORS[*].mean. Reduces to plain OLS when all strengths = 0.
+ *
+ * Returns null only when the regularized normal-equations matrix is
+ * singular — should never happen with non-zero priors since each
+ * strength adds to its diagonal entry.
  */
-function solveOls(X: number[][], y: number[]): RfParamFitResult | null {
+function solveRidgeWLS(
+  X: number[][],
+  y: number[],
+  w: number[],
+): RfParamFitResult | null {
   const n = X.length;
   const p = X[0].length;
+  if (PRIORS.length !== p) {
+    throw new Error(
+      `PRIORS length (${PRIORS.length}) does not match design matrix columns (${p})`,
+    );
+  }
 
-  // XᵀX (p×p) and Xᵀy (p×1).
-  const XtX: number[][] = Array.from({ length: p }, () =>
+  // XᵀWX (p×p) and XᵀWy (p×1).
+  const XtWX: number[][] = Array.from({ length: p }, () =>
     new Array(p).fill(0),
   );
-  const Xty: number[] = new Array(p).fill(0);
+  const XtWy: number[] = new Array(p).fill(0);
   for (let i = 0; i < n; i++) {
+    const wi = w[i];
     for (let a = 0; a < p; a++) {
-      Xty[a] += X[i][a] * y[i];
+      XtWy[a] += wi * X[i][a] * y[i];
       for (let b = 0; b < p; b++) {
-        XtX[a][b] += X[i][a] * X[i][b];
+        XtWX[a][b] += wi * X[i][a] * X[i][b];
       }
     }
   }
 
-  const inv = invertMatrix(XtX);
+  // Add ridge: Λ on the diagonal, Λ·β₀ to the RHS.
+  for (let a = 0; a < p; a++) {
+    XtWX[a][a] += PRIORS[a].strength;
+    XtWy[a] += PRIORS[a].strength * PRIORS[a].mean;
+  }
+
+  const inv = invertMatrix(XtWX);
   if (!inv) return null;
 
   const beta = new Array(p).fill(0);
   for (let a = 0; a < p; a++) {
-    for (let b = 0; b < p; b++) beta[a] += inv[a][b] * Xty[b];
+    for (let b = 0; b < p; b++) beta[a] += inv[a][b] * XtWy[b];
   }
 
-  // Residuals + R².
+  // Weighted R² and residual stdev — computed against the *data fit*
+  // only (not the regularization penalty), so the quality readout
+  // reports how well the picked β explains the observations.
+  let sumW = 0;
+  let sumWy = 0;
+  for (let i = 0; i < n; i++) {
+    sumW += w[i];
+    sumWy += w[i] * y[i];
+  }
+  const meanY = sumWy / sumW;
   let sse = 0;
-  let sumY = 0;
-  for (let i = 0; i < n; i++) sumY += y[i];
-  const meanY = sumY / n;
   let sst = 0;
   for (let i = 0; i < n; i++) {
     let yhat = 0;
     for (let a = 0; a < p; a++) yhat += X[i][a] * beta[a];
     const r = y[i] - yhat;
-    sse += r * r;
-    sst += (y[i] - meanY) * (y[i] - meanY);
+    sse += w[i] * r * r;
+    sst += w[i] * (y[i] - meanY) ** 2;
   }
   const rSquared = sst > 1e-9 ? Math.max(0, Math.min(1, 1 - sse / sst)) : 0;
-  const residualStd = Math.sqrt(sse / Math.max(1, n - p));
+  // Residual std in dB-equivalent units. Use weighted-effective sample
+  // count (which equals #pairs under per-pair weighting) to keep the
+  // number meaningful — otherwise dividing by raw `n` deflates it.
+  const effN = sumW;
+  const residualStd = Math.sqrt(sse / Math.max(1, effN - p));
 
-  // Clamp into physically plausible territory. Negative attenuations
-  // are nonsensical (the model would produce stronger-than-1m signal
-  // at distance), and a near-zero or negative path-loss exponent makes
-  // the model unable to differentiate distances at all.
+  // Clamp into physically plausible territory. The ridge usually keeps
+  // values in range, but extreme datasets with strong unmodelled
+  // effects can still push β out — clamp as a final safety net.
   return {
     pathLossExponent: clamp(beta[0], MIN_N, MAX_N),
     wallAttenuationDb: clamp(beta[1], MIN_ATT_DB, MAX_ATT_DB),
