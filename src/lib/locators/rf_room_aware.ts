@@ -2,6 +2,7 @@ import type { Node, Room } from "@/lib/config";
 import { openToId } from "@/lib/config/schema";
 import { buildObstructionFn } from "@/lib/map/rf_cache";
 import { getStore } from "@/lib/state/store";
+import { nelderMead2D } from "./nelder_mead";
 import {
   computeAllOverlaps,
   computeRoomAdjacency,
@@ -113,6 +114,14 @@ const CLOSEST_PRIOR_MAX_DIST_M = 6;
  * 15% of its measured distance.
  */
 const REL_TOL = 0.15;
+
+/**
+ * Huber loss inflection point in the post-seed trilateration step.
+ * Residuals below this contribute quadratically (precise fit where
+ * data agrees), residuals above flatten to linear (one wild outlier
+ * can't dominate). Same value the standalone Nelder-Mead locator uses.
+ */
+const HUBER_DELTA = 1.5;
 
 export class RfRoomAwareLocator implements Locator {
   readonly name = "rf_room_aware";
@@ -289,19 +298,64 @@ export class RfRoomAwareLocator implements Locator {
       scored.push({ cx: o.cx, cy: o.cy, score });
     }
 
-    // Concentrated weighted centroid (winner takes most).
-    let wx = 0;
-    let wy = 0;
-    let wTotal = 0;
-    for (const s of scored) {
-      const w = Math.pow(Math.max(0, s.score), SCORE_CONCENTRATION_POWER);
-      wx += w * s.cx;
-      wy += w * s.cy;
-      wTotal += w;
+    // Two-stage position: first pick a room-aware seed via the
+    // RF-weighted scoring, then refine via Nelder-Mead trilateration
+    // for geometric accuracy.
+    //
+    // Why two stages: the score-weighted centroid alone (the original
+    // RfRoomAware design) finds the *right room* but is positionally
+    // biased — the centroid averages many candidate intersection
+    // points, and most pairs contribute candidates that aren't at the
+    // true geometric solution. Trilateration solvers (MLE/NM/BFGS) get
+    // the position right but can land in the wrong room when the
+    // geometry is ambiguous near walls. Combining them: use the
+    // RF-weighted top candidate as the NM seed (room-correct), then
+    // let NM find the geometric optimum within that room's basin.
+    //
+    // The seed is the single highest-scoring candidate (after
+    // SCORE_CONCENTRATION_POWER amplification), not the weighted
+    // centroid — picking a real intersection point rather than an
+    // averaged one gives NM a starting point that's already near a
+    // local minimum of the objective.
+    if (scored.length === 0) return fallbackIDW(fixes, this.name);
+    let bestSeedIdx = 0;
+    let bestSeedScore = -Infinity;
+    for (let i = 0; i < scored.length; i++) {
+      const w = Math.pow(Math.max(0, scored[i].score), SCORE_CONCENTRATION_POWER);
+      if (w > bestSeedScore) {
+        bestSeedScore = w;
+        bestSeedIdx = i;
+      }
     }
-    if (wTotal <= 1e-9) return fallbackIDW(fixes, this.name);
-    const posX = wx / wTotal;
-    const posY = wy / wTotal;
+    const seedX = scored[bestSeedIdx].cx;
+    const seedY = scored[bestSeedIdx].cy;
+
+    // NM with the standard weighted Huber objective. Same form as the
+    // standalone NelderMeadLocator — minimize Σ w_i · ρ(||p − node_i||
+    // − d_i) with w_i = 1/d_i² and ρ a Huber. We don't apply RF
+    // weighting inside the objective: the seed is already room-
+    // correct, and NM should converge locally to the geometric
+    // minimum without straying.
+    const objective = (p: [number, number]): number => {
+      let sum = 0;
+      for (const f of fixes) {
+        const dx = p[0] - f.point[0];
+        const dy = p[1] - f.point[1];
+        const calc = Math.sqrt(dx * dx + dy * dy);
+        const r = calc - f.distance;
+        const absR = Math.abs(r);
+        const lossR =
+          absR <= HUBER_DELTA
+            ? 0.5 * r * r
+            : HUBER_DELTA * (absR - 0.5 * HUBER_DELTA);
+        const w = 1 / (f.distance * f.distance + 1e-6);
+        sum += w * lossR;
+      }
+      return sum;
+    };
+    const refined = nelderMead2D(objective, [seedX, seedY]);
+    const posX = refined.x[0];
+    const posY = refined.x[1];
 
     // Z from distance-weighted average.
     let zw = 0;
