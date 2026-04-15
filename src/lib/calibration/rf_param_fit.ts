@@ -85,21 +85,32 @@ const MAX_ATT_DB = 30;
 
 /**
  * Ridge prior toward physically plausible RF-model defaults. Without
- * regularization, the unweighted OLS finds degenerate solutions where
- * the path-loss exponent absorbs the wall effect (more distance vs.
- * one extra wall is statistically near-equivalent on this dataset
+ * regularization, the weighted OLS still finds degenerate solutions
+ * where the path-loss exponent absorbs the wall effect (more distance
+ * vs. one extra wall is statistically near-equivalent on this dataset
  * since long paths usually cross more walls — collinear). The result
  * is non-physical (e.g. "exterior walls attenuate 1 dB") and the
  * model can't distinguish open from walled paths anymore.
  *
- * Each entry is `[prior_mean, strength]`. `strength` is in the same
- * units as the design matrix's diagonal entries (sum of weighted
- * x²) — interpreted as "equivalent observations of zero-residual at
- * the prior." With per-pair weighting normalizing each pair to total
- * weight 1, the design-matrix diagonals scale with the count of
- * pairs. Setting strengths in single-digit units means the prior is
- * worth a handful of pairs' worth of evidence — strong enough to
- * break ties, weak enough that real signal overrides it.
+ * Each entry is `{ mean, weightFraction }`. The actual ridge strength
+ * λ is computed at solve time as `weightFraction × diagonal[i]` of
+ * the weighted design matrix, so the prior is automatically scaled
+ * relative to whatever evidence the data carries on that parameter.
+ *
+ * Interpretation: `weightFraction = 0.5` means "the prior is worth
+ * half as much as the data evidence" on that parameter. 0 means
+ * unregularized; 1 means equally weighted; >1 means prior dominates.
+ *
+ * Tuning by parameter — fractions reflect how much we trust the
+ * physical default vs the data:
+ *   - n: 0.1 — most data-driven, weakest prior. Indoor n varies a lot.
+ *   - wall: 0.5 — moderate. Drywall is 2–6 dB; data should still drive.
+ *   - ext: 1.0 — equal weight. Exterior walls are well-known to be
+ *     sigificantly heavier than interior; the data alone is unreliable
+ *     because cross-exterior paths are sparse.
+ *   - door: 2.0 — prior dominates. There's almost no door-only path
+ *     variance in typical configs (doors live on walls); the regression
+ *     can't identify door attenuation independently, so we anchor it.
  *
  * Indices match the column order of X:
  *   0 = path_loss_exponent (10·log10(d) coefficient)
@@ -107,11 +118,11 @@ const MAX_ATT_DB = 30;
  *   2 = exterior_wall_attenuation_db (per exterior crossing)
  *   3 = door_attenuation_db (per door crossing)
  */
-const PRIORS: ReadonlyArray<{ mean: number; strength: number }> = [
-  { mean: 3.0, strength: 2 }, // n: weakly anchored — this is the most data-driven
-  { mean: 4.0, strength: 4 }, // wall: moderately anchored — drywall is well-known
-  { mean: 10.0, strength: 8 }, // exterior: strongly anchored — exterior walls definitely > 1 dB
-  { mean: 0.0, strength: 12 }, // door: strongly anchored at 0 — most "doors" are gaps with negligible loss
+const PRIORS: ReadonlyArray<{ mean: number; weightFraction: number }> = [
+  { mean: 3.0, weightFraction: 0.02 },
+  { mean: 4.0, weightFraction: 0.1 },
+  { mean: 10.0, weightFraction: 0.2 },
+  { mean: 0.0, weightFraction: 1.0 },
 ];
 
 /**
@@ -266,10 +277,17 @@ function solveRidgeWLS(
     }
   }
 
-  // Add ridge: Λ on the diagonal, Λ·β₀ to the RHS.
+  // Add ridge: λ_a = weightFraction_a × XtWX[a][a]_data, then add λ_a
+  // to the diagonal and λ_a·β₀_a to the RHS. Capturing the *data-only*
+  // diagonal first means the ridge scales naturally with the evidence
+  // each parameter carries — a parameter with lots of variation in
+  // its column gets a stronger nominal λ, but the prior strength as a
+  // fraction of evidence stays constant per the configured weightFraction.
   for (let a = 0; a < p; a++) {
-    XtWX[a][a] += PRIORS[a].strength;
-    XtWy[a] += PRIORS[a].strength * PRIORS[a].mean;
+    const dataDiag = XtWX[a][a];
+    const lambda = PRIORS[a].weightFraction * dataDiag;
+    XtWX[a][a] += lambda;
+    XtWy[a] += lambda * PRIORS[a].mean;
   }
 
   const inv = invertMatrix(XtWX);
