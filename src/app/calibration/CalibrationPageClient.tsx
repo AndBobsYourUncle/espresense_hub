@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Clock,
   GitCompareArrows,
+  Radio,
   Sparkles,
   Timer,
   Trash2,
@@ -28,6 +29,7 @@ import type {
 } from "@/app/api/calibration/route";
 import type { AutofitResponse } from "@/app/api/calibration/autofit/route";
 import type { ApplyResponse } from "@/app/api/calibration/apply/route";
+import type { RfFitResponse } from "@/app/api/calibration/rf_fit/route";
 import type { AutoApplyAuditResponse } from "@/app/api/calibration/audit/route";
 import type { DevicePositionsResponse } from "@/app/api/devices/positions/route";
 import type { NodeFit, NodePairFit } from "@/lib/calibration/autofit";
@@ -266,6 +268,7 @@ export default function CalibrationPageClient() {
         <div className="max-w-5xl space-y-4">
           <AutoApplyStatus audit={audit} />
           <LocatorComparisonPanel />
+          <RfFitPanel />
 
           <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 px-4 py-3 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
             <p className="font-medium text-zinc-900 dark:text-zinc-100 mb-1">
@@ -870,6 +873,288 @@ function RateLimitBadge({
 }
 
 /**
+ * RF parameter fit panel. Solves for the path-loss exponent and three
+ * attenuation constants (interior wall, exterior wall, door) that best
+ * explain the node-to-node sample matrix, then shows fitted vs
+ * configured values side-by-side. Each parameter has its own apply
+ * checkbox so the user can adopt some and reject others — useful when
+ * one fit looks suspect (e.g. door attenuation often clamps at 0
+ * because there aren't enough door-only paths to identify it).
+ *
+ * Apply hits /api/calibration/rf_fit/apply which writes config.yaml
+ * and reloads the live config — RF cache rebuilds, every downstream
+ * RF-aware computation immediately uses the new values.
+ */
+function RfFitPanel() {
+  const [fit, setFit] = useState<RfFitResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [applyMsg, setApplyMsg] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+
+  const runFit = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/calibration/rf_fit", { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as RfFitResponse;
+      setFit(data);
+      // Default-select rows whose proposed value differs meaningfully from
+      // configured. Tiny diffs (<0.1 dB or <0.05 in n) aren't worth a
+      // reload — the user can still tick them manually.
+      if (data.fit) {
+        const sig = (a: number, b: number, eps: number) =>
+          Math.abs(a - b) >= eps;
+        setSelected({
+          pathLossExponent: sig(
+            data.fit.pathLossExponent,
+            data.current.pathLossExponent,
+            0.05,
+          ),
+          wallAttenuationDb: sig(
+            data.fit.wallAttenuationDb,
+            data.current.wallAttenuationDb,
+            0.1,
+          ),
+          exteriorWallAttenuationDb: sig(
+            data.fit.exteriorWallAttenuationDb,
+            data.current.exteriorWallAttenuationDb,
+            0.1,
+          ),
+          doorAttenuationDb: sig(
+            data.fit.doorAttenuationDb,
+            data.current.doorAttenuationDb,
+            0.1,
+          ),
+        });
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const apply = useCallback(async () => {
+    if (!fit?.fit) return;
+    setApplying(true);
+    setApplyMsg(null);
+    setError(null);
+    const body: Record<string, number> = {};
+    if (selected.pathLossExponent) body.pathLossExponent = fit.fit.pathLossExponent;
+    if (selected.wallAttenuationDb)
+      body.wallAttenuationDb = fit.fit.wallAttenuationDb;
+    if (selected.exteriorWallAttenuationDb)
+      body.exteriorWallAttenuationDb = fit.fit.exteriorWallAttenuationDb;
+    if (selected.doorAttenuationDb)
+      body.doorAttenuationDb = fit.fit.doorAttenuationDb;
+    if (Object.keys(body).length === 0) {
+      setError("No parameters selected");
+      setApplying(false);
+      return;
+    }
+    try {
+      const res = await fetch("/api/calibration/rf_fit/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? `HTTP ${res.status}`);
+      }
+      setApplyMsg(
+        `Applied ${Object.keys(body).length} parameter${
+          Object.keys(body).length === 1 ? "" : "s"
+        }. Re-running fit…`,
+      );
+      // Re-fit so the panel reflects the new "current" values.
+      await runFit();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setApplying(false);
+    }
+  }, [fit, selected, runFit]);
+
+  const rows: Array<{
+    key: keyof typeof selected;
+    label: string;
+    unit: string;
+    proposed: number;
+    current: number;
+  }> = fit?.fit
+    ? [
+        {
+          key: "pathLossExponent",
+          label: "Path-loss exponent",
+          unit: "",
+          proposed: fit.fit.pathLossExponent,
+          current: fit.current.pathLossExponent,
+        },
+        {
+          key: "wallAttenuationDb",
+          label: "Interior wall attenuation",
+          unit: " dB",
+          proposed: fit.fit.wallAttenuationDb,
+          current: fit.current.wallAttenuationDb,
+        },
+        {
+          key: "exteriorWallAttenuationDb",
+          label: "Exterior wall attenuation",
+          unit: " dB",
+          proposed: fit.fit.exteriorWallAttenuationDb,
+          current: fit.current.exteriorWallAttenuationDb,
+        },
+        {
+          key: "doorAttenuationDb",
+          label: "Door attenuation",
+          unit: " dB",
+          proposed: fit.fit.doorAttenuationDb,
+          current: fit.current.doorAttenuationDb,
+        },
+      ]
+    : [];
+
+  return (
+    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+      <div className="px-4 py-3 bg-zinc-50 dark:bg-zinc-900/40 flex items-center gap-2">
+        <Radio className="h-4 w-4 text-zinc-500" />
+        <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+          RF model fit
+        </div>
+        <div className="text-xs text-zinc-500 dark:text-zinc-400 flex-1">
+          Fit walls/doors/path-loss from the node-to-node sample matrix
+        </div>
+        <button
+          type="button"
+          onClick={runFit}
+          disabled={loading}
+          className="text-xs px-2.5 py-1 rounded border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800/60 disabled:opacity-50"
+        >
+          {loading ? "Fitting…" : fit ? "Re-run" : "Run fit"}
+        </button>
+      </div>
+      <div className="px-4 py-3 space-y-3">
+        {error && (
+          <div className="text-xs text-red-600 dark:text-red-400">{error}</div>
+        )}
+        {applyMsg && (
+          <div className="text-xs text-emerald-600 dark:text-emerald-400">
+            {applyMsg}
+          </div>
+        )}
+        {!fit && !loading && (
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+            Solves a least-squares problem over every node-to-node sample
+            for the four physics parameters that drive the RF map. Useful
+            when fitted per-pair n values drop below 2 (model
+            over-attenuates) or stay much higher than expected (model
+            under-attenuates). Defaults are reasonable starting guesses;
+            this tunes them to your specific construction.
+          </p>
+        )}
+        {fit?.fit === null && (
+          <div className="text-xs text-amber-600 dark:text-amber-400">
+            Not enough samples to fit yet (need at least 20 cross-pair
+            observations on the same floor). Let calibration accumulate
+            for a few more minutes and try again.
+          </div>
+        )}
+        {fit?.fit && (
+          <>
+            <div className="text-xs text-zinc-500 dark:text-zinc-400">
+              Fit on {fit.fit.sampleCount.toLocaleString()} samples
+              · R² = {fit.fit.rSquared.toFixed(2)} · residual σ ={" "}
+              {fit.fit.residualStdDb.toFixed(1)} dB
+            </div>
+            <table className="w-full text-xs">
+              <thead className="text-xs uppercase tracking-wide text-zinc-400">
+                <tr>
+                  <th className="text-left font-normal px-2 py-1 w-6"></th>
+                  <th className="text-left font-normal px-2 py-1">Parameter</th>
+                  <th className="text-right font-normal px-2 py-1">Current</th>
+                  <th className="text-right font-normal px-2 py-1">Fitted</th>
+                  <th className="text-right font-normal px-2 py-1">Δ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const delta = r.proposed - r.current;
+                  const deltaCls =
+                    Math.abs(delta) < 0.1
+                      ? "text-zinc-500"
+                      : delta > 0
+                        ? "text-amber-600 dark:text-amber-400"
+                        : "text-emerald-600 dark:text-emerald-400";
+                  return (
+                    <tr
+                      key={r.key}
+                      className="border-t border-zinc-100/60 dark:border-zinc-800/40"
+                    >
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="checkbox"
+                          checked={!!selected[r.key]}
+                          onChange={(e) =>
+                            setSelected((prev) => ({
+                              ...prev,
+                              [r.key]: e.target.checked,
+                            }))
+                          }
+                        />
+                      </td>
+                      <td className="px-2 py-1.5">{r.label}</td>
+                      <td className="px-2 py-1.5 text-right font-mono text-zinc-500">
+                        {r.current.toFixed(2)}
+                        {r.unit}
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-mono text-zinc-900 dark:text-zinc-100">
+                        {r.proposed.toFixed(2)}
+                        {r.unit}
+                      </td>
+                      <td
+                        className={`px-2 py-1.5 text-right font-mono ${deltaCls}`}
+                      >
+                        {delta >= 0 ? "+" : ""}
+                        {delta.toFixed(2)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={apply}
+                disabled={
+                  applying || !Object.values(selected).some(Boolean)
+                }
+                className="text-xs px-3 py-1.5 rounded bg-zinc-900 dark:bg-zinc-100 text-zinc-50 dark:text-zinc-900 disabled:opacity-50 hover:bg-zinc-700 dark:hover:bg-zinc-200"
+              >
+                {applying ? "Applying…" : "Apply selected"}
+              </button>
+            </div>
+            <p className="text-[11px] text-zinc-400 leading-relaxed">
+              Apply writes the selected values to <code>config.yaml</code> and
+              reloads the live config — every RF-aware computation (per-pair
+              fits, propagation overlay, future locator weighting) starts
+              using the new values immediately. R² {"<"}0.5 means the linear
+              model isn&apos;t capturing much of the variance — usually
+              multipath / body-shadow / antenna asymmetry. The fitted values
+              are still informative but treat with extra skepticism.
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
  * Cross-locator comparison panel. Shows running mean distance from
  * each non-active locator's output to ours, persisted across restarts.
  * Aggregates across all devices for the headline number; expands per-
@@ -1233,11 +1518,25 @@ function PairBreakdown({
   pairs: NodePairFit[];
   units: "metric" | "imperial";
 }) {
-  // Sort by absolute deviation from listener average — most divergent first.
+  // Reference for the "Δ from avg" column. Originally this was the
+  // listener-level absorption (the value pushed to firmware) — fine
+  // when both fits used the same math. After the per-pair fit started
+  // subtracting the RF-map structural-loss term W, the two values
+  // measure different things (clutter-only vs walls-included), so
+  // listener absorption became a meaningless reference (every Δ shows
+  // ~1–2 negative because that gap is the average wall attenuation,
+  // not a per-pair anomaly). Compare each pair to the *mean of pair
+  // n's for this listener* instead — that recovers the column's intent
+  // (find unusually-attenuated paths relative to this node's typical
+  // neighborhood) without depending on the listener fit at all.
+  const meanPairN =
+    pairs.length > 0
+      ? pairs.reduce((s, p) => s + p.perPairAbsorption, 0) / pairs.length
+      : listenerAbsorption;
   const sorted = [...pairs].sort(
     (a, b) =>
-      Math.abs(b.perPairAbsorption - listenerAbsorption) -
-      Math.abs(a.perPairAbsorption - listenerAbsorption),
+      Math.abs(b.perPairAbsorption - meanPairN) -
+      Math.abs(a.perPairAbsorption - meanPairN),
   );
 
   return (
@@ -1258,7 +1557,7 @@ function PairBreakdown({
         </thead>
         <tbody>
           {sorted.map((p) => {
-            const delta = p.perPairAbsorption - listenerAbsorption;
+            const delta = p.perPairAbsorption - meanPairN;
             const absDelta = Math.abs(delta);
             const deltaCls =
               absDelta < 0.2
@@ -1276,7 +1575,19 @@ function PairBreakdown({
                   {formatDistanceDisplay(p.meanTrueDist, units)}
                 </td>
                 <td className="px-2 py-1 text-right font-mono text-zinc-900 dark:text-zinc-100">
-                  {p.perPairAbsorption.toFixed(2)}
+                  <span className="inline-flex items-center gap-1">
+                    {p.perPairAbsorption < 2.0 && (
+                      <span
+                        className="text-amber-500 dark:text-amber-400 text-xs"
+                        title={
+                          "Below free-space (n=2). After subtracting the configured walls/doors, the residual exponent is sub-physical — the RF model is over-attenuating this path. Likely cause: an unmodelled opening, an over-counted wall, or a reflective path the geometry doesn't see. Run the RF model fit at the top of this page to recalibrate the global attenuation constants."
+                        }
+                      >
+                        ⚠
+                      </span>
+                    )}
+                    {p.perPairAbsorption.toFixed(2)}
+                  </span>
                 </td>
                 <td className={`px-2 py-1 text-right font-mono ${deltaCls}`}>
                   {delta >= 0 ? "+" : ""}
@@ -1294,12 +1605,17 @@ function PairBreakdown({
         </tbody>
       </table>
       <div className="text-xs text-zinc-400 leading-relaxed">
-        Each row is the absorption that would make this single (listener →
-        transmitter) path read accurately. The listener-level absorption
-        ({listenerAbsorption.toFixed(2)}) is the median across all pairs.
-        Pairs with large Δ are paths through unusually strong or weak
-        attenuation — typically extra walls, metal furniture, or open
-        line-of-sight.
+        Each row is the clutter-only path-loss exponent for this
+        (listener → transmitter) path — the RF map's structural loss
+        (walls, doors, exterior) has already been subtracted out. Δ is
+        relative to this listener's per-pair mean ({meanPairN.toFixed(2)}),
+        so large deviations flag paths that propagate unusually well or
+        poorly *after* accounting for known walls. Common causes: metal
+        furniture, body shadow, unmodelled openings, or short-range
+        multipath. The listener absorption ({listenerAbsorption.toFixed(2)})
+        pushed to firmware is higher because it bakes the average wall
+        attenuation into the exponent — firmware has no map and can't
+        apply walls per-path.
       </div>
     </div>
   );

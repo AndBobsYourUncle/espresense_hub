@@ -526,6 +526,97 @@ export async function updatePresenceZones(zones: unknown[]): Promise<void> {
   }
 }
 
+/**
+ * Update the `rf:` block (or any subset of it) in config.yaml. Used by
+ * the RF parameter fit's apply step — the user reviews fitted vs
+ * configured values in the calibration UI and applies the ones they
+ * trust. We surgically merge into the existing `rf:` mapping so
+ * unchanged keys (e.g. `path_loss_exponent` if only walls were applied)
+ * keep their existing comments and ordering.
+ */
+export async function updateRfParameters(
+  params: Partial<{
+    pathLossExponent: number;
+    referenceRssi1m: number;
+    wallAttenuationDb: number;
+    exteriorWallAttenuationDb: number;
+    doorAttenuationDb: number;
+  }>,
+): Promise<void> {
+  const configPath = resolveConfigPath();
+  let yamlText: string;
+  try {
+    yamlText = await readFile(configPath, "utf8");
+  } catch {
+    throw new ConfigWriteError(
+      `Could not read config at ${configPath}`,
+      "not-found",
+    );
+  }
+
+  const doc = parseDocument(yamlText);
+  if (doc.errors.length > 0) {
+    throw new ConfigWriteError(
+      `Existing config has parse errors: ${doc.errors[0].message}`,
+      "parse-failed",
+    );
+  }
+
+  if (!isMap(doc.get("rf"))) {
+    doc.set("rf", doc.createNode({}));
+  }
+  const round = (n: number): number => Math.round(n * 100) / 100;
+  if (params.pathLossExponent != null) {
+    doc.setIn(["rf", "path_loss_exponent"], round(params.pathLossExponent));
+  }
+  if (params.referenceRssi1m != null) {
+    doc.setIn(["rf", "reference_rssi_1m"], round(params.referenceRssi1m));
+  }
+  if (params.wallAttenuationDb != null) {
+    doc.setIn(["rf", "wall_attenuation_db"], round(params.wallAttenuationDb));
+  }
+  if (params.exteriorWallAttenuationDb != null) {
+    doc.setIn(
+      ["rf", "exterior_wall_attenuation_db"],
+      round(params.exteriorWallAttenuationDb),
+    );
+  }
+  if (params.doorAttenuationDb != null) {
+    doc.setIn(["rf", "door_attenuation_db"], round(params.doorAttenuationDb));
+  }
+
+  const newYaml = doc.toString();
+  const reparseDoc = parseDocument(newYaml);
+  if (reparseDoc.errors.length > 0) {
+    throw new ConfigWriteError(
+      `Internal: edited YAML failed to round-trip parse: ${reparseDoc.errors[0].message}`,
+      "invalid-after-edit",
+    );
+  }
+  const validation = ConfigSchema.safeParse(reparseDoc.toJS());
+  if (!validation.success) {
+    const issue = validation.error.issues[0];
+    const issuePath = issue?.path?.join(".") ?? "(root)";
+    throw new ConfigWriteError(
+      `Edited config failed validation at ${issuePath}: ${issue?.message ?? "unknown"}`,
+      "invalid-after-edit",
+    );
+  }
+
+  const dir = path.dirname(configPath);
+  const base = path.basename(configPath);
+  const tmpPath = path.join(dir, `.${base}.tmp-${process.pid}`);
+  try {
+    await writeFile(tmpPath, newYaml, "utf8");
+    await rename(tmpPath, configPath);
+  } catch (err) {
+    throw new ConfigWriteError(
+      `Failed to write config: ${(err as Error).message}`,
+      "io-failed",
+    );
+  }
+}
+
 /** Update the `point` field of a node identified by `nodeId`. */
 export async function updateNodePoint(
   nodeId: string,
