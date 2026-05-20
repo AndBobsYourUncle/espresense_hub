@@ -1,6 +1,11 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { PairStats } from "@/lib/calibration/autofit";
+import type {
+  CascadeFit,
+  NodeOffsets,
+  PairRssiStats,
+} from "@/lib/calibration/cascade";
 import { resolveConfigPath } from "@/lib/config/load";
 import type {
   GroundTruthSample,
@@ -31,17 +36,21 @@ import type {
 
 const FILE_NAME = "calibration.json";
 
+/**
+ * v1: the original — pair fit stats, ground-truth samples, residuals.
+ * v2: adds cascade calibration (Phase 1 of state-tracker rebuild):
+ *   - per-(TX, RX) RSSI residual stats
+ *   - latest cascade fit (Layer 1 + 2 parameters)
+ *
+ * The loader accepts both versions; v1 files just don't have the
+ * cascade fields, which means the cascade re-bootstraps from scratch
+ * on a v1→v2 upgrade. That converges in hours once MQTT runs.
+ */
 interface CalibrationFileV1 {
   version: 1;
   savedAt: number;
-
-  /** nodePairFitStats: listenerId → transmitterId → PairStats */
   pairFitStats: Record<string, Record<string, PairStats>>;
-
-  /** nodeGroundTruthSamples: listenerId → [GroundTruthSample, ...] */
   groundTruthSamples: Record<string, GroundTruthSample[]>;
-
-  /** Per-node residual aggregators. */
   residuals: Record<
     string,
     {
@@ -50,6 +59,54 @@ interface CalibrationFileV1 {
     }
   >;
 }
+
+interface SerializedCascadeFit {
+  pathLossExponent: number;
+  wallAttenuationDb: number;
+  exteriorWallAttenuationDb: number;
+  doorAttenuationDb: number;
+  /** Phase 1.7+. Optional for back-compat with older saved fits. */
+  reflectionLossDb?: number;
+  referenceRssi1m: number;
+  nodeOffsets: Record<string, { txOffsetDb: number; rxOffsetDb: number }>;
+  referenceNodeId: string | null;
+  rSquared: number;
+  residualStdDb: number;
+  pairCount: number;
+  totalWeight: number;
+  fittedAtMs: number;
+}
+
+interface CalibrationFileV2 {
+  version: 2;
+  savedAt: number;
+  pairFitStats: Record<string, Record<string, PairStats>>;
+  groundTruthSamples: Record<string, GroundTruthSample[]>;
+  residuals: Record<
+    string,
+    {
+      loo?: NodeResidualStats;
+      gt?: NodeResidualStats;
+    }
+  >;
+  /** Cascade per-(TX, RX) RSSI residual stats, txId → rxId → stats. */
+  cascadePairStats?: Record<string, Record<string, PairRssiStatsSerialized>>;
+  /** Most recent cascade fit; serialized form (Map → Record). */
+  latestCascadeFit?: SerializedCascadeFit;
+}
+
+/** Stripped serialized form of PairRssiStats — no recent ring buffer for size. */
+interface PairRssiStatsSerialized {
+  weight: number;
+  sumRssi: number;
+  sumRssiSq: number;
+  trueDist: number;
+  walls: { interior: number; exterior: number; doors: number };
+  lastUpdateMs: number;
+  totalSamples: number;
+}
+
+type CalibrationFile = CalibrationFileV1 | CalibrationFileV2;
 
 function calibrationPath(): string {
   return path.join(path.dirname(resolveConfigPath()), FILE_NAME);
@@ -73,9 +130,9 @@ export async function loadCalibration(store: Store): Promise<void> {
     throw err;
   }
 
-  let parsed: CalibrationFileV1;
+  let parsed: CalibrationFile;
   try {
-    parsed = JSON.parse(raw) as CalibrationFileV1;
+    parsed = JSON.parse(raw) as CalibrationFile;
   } catch (err) {
     console.error(
       `[cal-persist] failed to parse ${filePath}:`,
@@ -84,9 +141,10 @@ export async function loadCalibration(store: Store): Promise<void> {
     return;
   }
 
-  if (parsed.version !== 1) {
+  const version = (parsed as { version?: number }).version;
+  if (version !== 1 && version !== 2) {
     console.warn(
-      `[cal-persist] ${filePath} has unknown version ${parsed.version}, ignoring`,
+      `[cal-persist] ${filePath} has unknown version ${String(version)}, ignoring`,
     );
     return;
   }
@@ -153,8 +211,71 @@ export async function loadCalibration(store: Store): Promise<void> {
     if (r.loo || r.gt) residualNodeCount += 1;
   }
 
+  // Restore cascade-calibration state (v2+ only). v1 files just
+  // skip this — cascade re-bootstraps from incoming MQTT samples.
+  let cascadePairCount = 0;
+  if (parsed.version === 2) {
+    for (const [txId, byRx] of Object.entries(parsed.cascadePairStats ?? {})) {
+      const inner = new Map<string, PairRssiStats>();
+      for (const [rxId, s] of Object.entries(byRx)) {
+        if (
+          typeof s?.weight === "number" &&
+          typeof s?.sumRssi === "number" &&
+          typeof s?.trueDist === "number" &&
+          s?.walls != null
+        ) {
+          inner.set(rxId, {
+            weight: s.weight,
+            sumRssi: s.sumRssi,
+            sumRssiSq: s.sumRssiSq,
+            trueDist: s.trueDist,
+            walls: { ...s.walls },
+            lastUpdateMs: s.lastUpdateMs ?? 0,
+            totalSamples: s.totalSamples ?? Math.round(s.weight),
+            // Ring buffer is not persisted (size + recency-only value).
+            // Re-populates from new MQTT samples after restart.
+            recent: [],
+          });
+          cascadePairCount += 1;
+        }
+      }
+      if (inner.size > 0) store.pairRssiStats.set(txId, inner);
+    }
+    if (parsed.latestCascadeFit) {
+      const f = parsed.latestCascadeFit;
+      const nodeOffsets = new Map<string, NodeOffsets>();
+      for (const [id, o] of Object.entries(f.nodeOffsets ?? {})) {
+        nodeOffsets.set(id, {
+          txOffsetDb: o.txOffsetDb ?? 0,
+          rxOffsetDb: o.rxOffsetDb ?? 0,
+        });
+      }
+      const restored: CascadeFit = {
+        pathLossExponent: f.pathLossExponent,
+        wallAttenuationDb: f.wallAttenuationDb,
+        exteriorWallAttenuationDb: f.exteriorWallAttenuationDb,
+        doorAttenuationDb: f.doorAttenuationDb,
+        // Default reflection loss to 6 dB (the prior mean) when
+        // restoring a pre-Phase-1.7 saved fit.
+        reflectionLossDb: f.reflectionLossDb ?? 6.0,
+        referenceRssi1m: f.referenceRssi1m,
+        nodeOffsets,
+        referenceNodeId: f.referenceNodeId,
+        rSquared: f.rSquared,
+        residualStdDb: f.residualStdDb,
+        pairCount: f.pairCount,
+        totalWeight: f.totalWeight,
+        fittedAtMs: f.fittedAtMs,
+        // Routed paths aren't persisted (recomputed on next refit
+        // from current routing graph). Restore as empty.
+        routedPaths: new Map(),
+      };
+      store.latestCascadeFit = restored;
+    }
+  }
+
   console.log(
-    `[cal-persist] loaded: ${pairCount} pair stats · ${sampleCount} GT samples · ${residualNodeCount} residual aggregates (saved ${ageHours.toFixed(1)}h ago)`,
+    `[cal-persist] loaded: ${pairCount} pair stats · ${sampleCount} GT samples · ${residualNodeCount} residual aggregates · ${cascadePairCount} cascade pairs (saved ${ageHours.toFixed(1)}h ago)`,
   );
 
   // Rebuild derived nodePairFits from the restored stats. This avoids a
@@ -172,8 +293,8 @@ export async function loadCalibration(store: Store): Promise<void> {
 export async function saveCalibration(store: Store): Promise<void> {
   const filePath = calibrationPath();
 
-  const data: CalibrationFileV1 = {
-    version: 1,
+  const data: CalibrationFileV2 = {
+    version: 2,
     savedAt: Date.now(),
     pairFitStats: {},
     groundTruthSamples: {},
@@ -211,12 +332,60 @@ export async function saveCalibration(store: Store): Promise<void> {
     }
   }
 
+  // Cascade calibration (v2): per-pair RSSI residual stats + most
+  // recent fit. Ring buffer of recent samples is intentionally not
+  // persisted (it's just a diagnostic display, costs storage,
+  // re-populates from MQTT after restart in seconds).
+  if (store.pairRssiStats.size > 0) {
+    const cps: Record<string, Record<string, PairRssiStatsSerialized>> = {};
+    for (const [txId, byRx] of store.pairRssiStats) {
+      const inner: Record<string, PairRssiStatsSerialized> = {};
+      for (const [rxId, stats] of byRx) {
+        inner[rxId] = {
+          weight: stats.weight,
+          sumRssi: stats.sumRssi,
+          sumRssiSq: stats.sumRssiSq,
+          trueDist: stats.trueDist,
+          walls: { ...stats.walls },
+          lastUpdateMs: stats.lastUpdateMs,
+          totalSamples: stats.totalSamples,
+        };
+      }
+      if (Object.keys(inner).length > 0) cps[txId] = inner;
+    }
+    if (Object.keys(cps).length > 0) data.cascadePairStats = cps;
+  }
+  if (store.latestCascadeFit) {
+    const f = store.latestCascadeFit;
+    const offsets: Record<string, { txOffsetDb: number; rxOffsetDb: number }> = {};
+    for (const [id, o] of f.nodeOffsets) {
+      offsets[id] = { ...o };
+    }
+    data.latestCascadeFit = {
+      pathLossExponent: f.pathLossExponent,
+      wallAttenuationDb: f.wallAttenuationDb,
+      exteriorWallAttenuationDb: f.exteriorWallAttenuationDb,
+      doorAttenuationDb: f.doorAttenuationDb,
+      reflectionLossDb: f.reflectionLossDb,
+      referenceRssi1m: f.referenceRssi1m,
+      nodeOffsets: offsets,
+      referenceNodeId: f.referenceNodeId,
+      rSquared: f.rSquared,
+      residualStdDb: f.residualStdDb,
+      pairCount: f.pairCount,
+      totalWeight: f.totalWeight,
+      fittedAtMs: f.fittedAtMs,
+    };
+  }
+
   // Skip the write if there's nothing meaningful to persist (fresh boot
   // before any MQTT messages). Avoids creating an empty/garbage file.
   const isEmpty =
     Object.keys(data.pairFitStats).length === 0 &&
     Object.keys(data.groundTruthSamples).length === 0 &&
-    Object.keys(data.residuals).length === 0;
+    Object.keys(data.residuals).length === 0 &&
+    !data.cascadePairStats &&
+    !data.latestCascadeFit;
   if (isEmpty) return;
 
   const tmp = `${filePath}.tmp`;

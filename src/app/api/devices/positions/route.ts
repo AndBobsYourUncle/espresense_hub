@@ -8,6 +8,23 @@ export interface AlternativePositionDTO {
   y: number;
   z: number;
   algorithm: string;
+  /**
+   * Optional diagnostic: the full candidate cloud the locator
+   * considered. Populated by particle-based locators so the UI can
+   * render the posterior as a cloud of dots instead of just one
+   * centroid. Encoded as `[x, y]` tuples to keep the wire size down.
+   */
+  candidates?: ReadonlyArray<readonly [number, number]>;
+  /** Optional per-observation rings (centerX, centerY, radius). */
+  rings?: ReadonlyArray<readonly [number, number, number]>;
+  /** Optional per-observation iso-RSSI contours grouped by node. */
+  contours?: ReadonlyArray<{
+    nodeId: string;
+    points: ReadonlyArray<readonly [number, number]>;
+    residualDb?: number;
+  }>;
+  /** Sparse density heatmap [x, y, density]. */
+  heatmap?: ReadonlyArray<readonly [number, number, number]>;
 }
 
 export interface DevicePositionDTO {

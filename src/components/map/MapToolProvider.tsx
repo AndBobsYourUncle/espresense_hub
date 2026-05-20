@@ -26,7 +26,8 @@ export type MapTool =
   | "pin"
   | "room-relations"
   | "presence-zones"
-  | "rf-propagation";
+  | "rf-propagation"
+  | "cascade";
 
 interface MapToolContextValue {
   activeTool: MapTool;
@@ -52,6 +53,23 @@ interface MapToolContextValue {
   setHiddenLocators: (
     next: ReadonlySet<string> | ((prev: ReadonlySet<string>) => ReadonlySet<string>),
   ) => void;
+  /**
+   * Cascade-tool "pinned pair" — the (TX, RX) pair key currently
+   * isolated on the map. Shared between the overlay (click pair
+   * line → set this) and the inspection panel (pairs table row
+   * highlight + click row → set this). Format: `${txId}|${rxId}`.
+   */
+  focusedCascadePairKey: string | null;
+  setFocusedCascadePairKey: (key: string | null) => void;
+  /**
+   * Map-wide device filter — when non-null, the map hides every
+   * device except the one matching this id. Useful for focusing
+   * on a single device's locator comparisons or cascade rings
+   * without the clutter of every tracked device drawing its own
+   * ghost markers at once.
+   */
+  filteredDeviceId: string | null;
+  setFilteredDeviceId: (id: string | null) => void;
 }
 
 const MapToolContext = createContext<MapToolContextValue | null>(null);
@@ -79,6 +97,12 @@ export default function MapToolProvider({
   // (active) and Bayesian (smart) as the primary comparison by default;
   // the other algorithms are collapsed behind a legend "show all" toggle
   // so the typical user isn't drowning in ghost dots.
+  const [focusedCascadePairKey, setFocusedCascadePairKey] = useState<
+    string | null
+  >(null);
+  const [filteredDeviceId, setFilteredDeviceId] = useState<string | null>(
+    null,
+  );
   const [hiddenLocators, setHiddenLocators] = useState<ReadonlySet<string>>(
     new Set([
       "nadaraya_watson",
@@ -108,10 +132,14 @@ export default function MapToolProvider({
     if (next !== "inspect") {
       setInspectedNodeIdState(null);
     }
+    // Pair focus is scoped to the cascade tool.
+    setFocusedCascadePairKey(null);
   }, []);
 
   const setInspectedNodeId = useCallback((id: string | null) => {
     setInspectedNodeIdState(id);
+    // Pair focus is scoped to the selected node.
+    setFocusedCascadePairKey(null);
   }, []);
 
   // ESC closes the inspection panel.
@@ -136,6 +164,10 @@ export default function MapToolProvider({
         hiddenLocators,
         toggleLocator,
         setHiddenLocators,
+        focusedCascadePairKey,
+        setFocusedCascadePairKey,
+        filteredDeviceId,
+        setFilteredDeviceId,
       }}
     >
       {children}

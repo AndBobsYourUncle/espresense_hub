@@ -4,6 +4,7 @@ import type { Point3D } from "@/lib/map/geometry";
 import { getStore, type DeviceState } from "@/lib/state/store";
 import { BayesianLocator } from "./bayesian";
 import { BFGSLocator } from "./bfgs";
+import { CascadeParticleLocator } from "./cascade_particle_locator";
 import { EnvironmentAwareLocator } from "./environment_aware";
 import { MLELocator } from "./mle";
 import { NadarayaWatsonLocator } from "./nadaraya_watson";
@@ -125,6 +126,18 @@ export function buildLocator(config: Config): LocatorBundle {
     new RfPhysicsLocator(allRooms, config.nodes),
   );
 
+  // Cascade particle locator — first consumer of the cascade
+  // calibration (Phase 3+4 merged). Uses the cascade's fitted RF
+  // parameters AND the routing graph's topology. Scatters particles
+  // across the floor; each descends the RSSI-residual likelihood
+  // surface to find physically consistent positions. Multi-modal
+  // (finds all plausible positions, not just one) and produces
+  // genuine uncertainty from particle cluster spread rather than a
+  // heuristic confidence formula.
+  const cascadeParticle = new OutlierRejectingLocator(
+    new CascadeParticleLocator(config),
+  );
+
   const allBases: Locator[] = [
     idw,
     nm,
@@ -135,6 +148,7 @@ export function buildLocator(config: Config): LocatorBundle {
     envAware,
     rfRoomAware,
     rfPhysics,
+    cascadeParticle,
   ];
   if (config.bayesian.enabled) {
     allBases.push(new BayesianLocator(roomAware));

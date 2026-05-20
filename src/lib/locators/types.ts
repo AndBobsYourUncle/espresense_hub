@@ -51,6 +51,47 @@ export interface LocatorResult {
    *   - any other string — a specific room id.
    */
   roomId?: string | null;
+  /**
+   * Optional diagnostic: the set of candidate points the locator
+   * considered. Populated by particle-based locators (cascade), so
+   * the UI can render the full posterior cloud rather than just the
+   * centroid. Null / omitted for point-estimate locators.
+   */
+  candidates?: ReadonlyArray<readonly [number, number]>;
+  /**
+   * Optional diagnostic: per-observation rings for visualization.
+   * Each entry is `[centerX, centerY, radius]`. The cascade locator
+   * emits one ring per observing node, at the RSSI-implied distance.
+   * UI renders them as SVG `<circle>` elements — clean visual of
+   * "where each node thinks the device might be."
+   */
+  rings?: ReadonlyArray<readonly [number, number, number]>;
+  /**
+   * Optional diagnostic: per-observation iso-RSSI contours. Each
+   * entry is a contour for one observing node, with its id and the
+   * list of cell centers making up that node's contour. UI renders
+   * each contour with a distinct color so the ring from node A is
+   * visually separable from node B's ring.
+   */
+  contours?: ReadonlyArray<{
+    nodeId: string;
+    points: ReadonlyArray<readonly [number, number]>;
+    /**
+     * Optional per-node residual at the locator's chosen position
+     * (observed_rssi − (predicted + tx_off), in dB). Lets the UI
+     * dim rings whose observation disagrees strongly with the
+     * consensus position, surfacing which nodes are outliers.
+     */
+    residualDb?: number;
+  }>;
+  /**
+   * Optional sparse density heatmap. Each entry is `[x, y, density]`
+   * — cell center and convergence value. Used by the cascade locator
+   * to surface the "where do many node rings converge densely"
+   * field as a renderable overlay. Only cells above a threshold are
+   * sent so SSE payloads stay small.
+   */
+  heatmap?: ReadonlyArray<readonly [number, number, number]>;
 }
 
 /** Common locator interface — all algorithms accept a list of fixes. */

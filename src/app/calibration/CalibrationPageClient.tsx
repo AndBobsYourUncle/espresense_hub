@@ -31,6 +31,7 @@ import type {
 import type { AutofitResponse } from "@/app/api/calibration/autofit/route";
 import type { ApplyResponse } from "@/app/api/calibration/apply/route";
 import type { RfFitResponse } from "@/app/api/calibration/rf_fit/route";
+import type { CascadeResponse } from "@/app/api/calibration/cascade/route";
 import { useDevicePositionsStream } from "@/components/map/useDevicePositionsStream";
 import type { AutoApplyAuditResponse } from "@/app/api/calibration/audit/route";
 import type { DevicePositionsResponse } from "@/app/api/devices/positions/route";
@@ -271,6 +272,7 @@ export default function CalibrationPageClient() {
           <AutoApplyStatus audit={audit} />
           <LocatorComparisonPanel />
           <RfFitPanel />
+          <CascadePanel />
 
           <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 px-4 py-3 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
             <p className="font-medium text-zinc-900 dark:text-zinc-100 mb-1">
@@ -1148,6 +1150,390 @@ function RfFitPanel() {
               model isn&apos;t capturing much of the variance — usually
               multipath / body-shadow / antenna asymmetry. The fitted values
               are still informative but treat with extra skepticism.
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Cascade calibration panel — Phase 1 of the state-tracker rebuild.
+ * Self-fitting RF model that consumes raw RSSI from node-to-node
+ * observations and learns Layer 1 (global RF parameters) +
+ * Layer 2 (per-node TX/RX offsets) without any user input.
+ *
+ * Currently parallel-diagnostic: nothing in the live positioning
+ * pipeline consumes this. Watch the values converge to plausible
+ * ranges and residuals settle (3–6 dB target) before a future
+ * locator (Phase 2/3) is built to consume it.
+ *
+ * See docs/state-tracker.md for the full design + success criteria.
+ */
+function CascadePanel() {
+  const [data, setData] = useState<CascadeResponse | null>(null);
+  const [showPairs, setShowPairs] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async (): Promise<void> => {
+      try {
+        const res = await fetch("/api/calibration/cascade", {
+          cache: "no-store",
+        });
+        if (!res.ok || cancelled) return;
+        const j = (await res.json()) as CascadeResponse;
+        if (!cancelled) setData(j);
+      } catch {
+        // best-effort
+      }
+    };
+    tick();
+    const id = setInterval(tick, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  const fit = data?.fit;
+  const cfg = data?.configured;
+
+  // Build per-row diff entries for Layer 1.
+  type L1Row = {
+    label: string;
+    fitted: number | undefined;
+    configured: number | undefined;
+    delta: number | undefined;
+    unit: string;
+  };
+  const layer1Rows: L1Row[] = [
+    {
+      label: "Path-loss exponent",
+      fitted: fit?.pathLossExponent,
+      configured: cfg?.pathLossExponent,
+      delta:
+        fit && cfg ? fit.pathLossExponent - cfg.pathLossExponent : undefined,
+      unit: "",
+    },
+    {
+      label: "Interior wall attenuation",
+      fitted: fit?.wallAttenuationDb,
+      configured: cfg?.wallAttenuationDb,
+      delta:
+        fit && cfg ? fit.wallAttenuationDb - cfg.wallAttenuationDb : undefined,
+      unit: " dB",
+    },
+    {
+      label: "Exterior wall attenuation",
+      fitted: fit?.exteriorWallAttenuationDb,
+      configured: cfg?.exteriorWallAttenuationDb,
+      delta:
+        fit && cfg
+          ? fit.exteriorWallAttenuationDb - cfg.exteriorWallAttenuationDb
+          : undefined,
+      unit: " dB",
+    },
+    {
+      label: "Door attenuation",
+      fitted: fit?.doorAttenuationDb,
+      configured: cfg?.doorAttenuationDb,
+      delta:
+        fit && cfg ? fit.doorAttenuationDb - cfg.doorAttenuationDb : undefined,
+      unit: " dB",
+    },
+    {
+      label: "Reflection loss (per bounce)",
+      fitted: fit?.reflectionLossDb,
+      configured: cfg?.reflectionLossDb,
+      delta:
+        fit && cfg
+          ? fit.reflectionLossDb - cfg.reflectionLossDb
+          : undefined,
+      unit: " dB",
+    },
+  ];
+
+  // Sort node offsets by total magnitude (most-divergent first).
+  const nodeRows = useMemo(() => {
+    if (!fit) return [];
+    return Object.entries(fit.nodeOffsets)
+      .map(([id, o]) => ({
+        nodeId: id,
+        ...o,
+        magnitude: Math.max(Math.abs(o.txOffsetDb), Math.abs(o.rxOffsetDb)),
+        isReference: id === fit.referenceNodeId,
+      }))
+      .sort((a, b) => {
+        // Reference node first, then by magnitude desc.
+        if (a.isReference) return -1;
+        if (b.isReference) return 1;
+        return b.magnitude - a.magnitude;
+      });
+  }, [fit]);
+
+  const pairCount = data?.pairs.length ?? 0;
+  const totalSamples = data?.pairs.reduce((s, p) => s + p.totalSamples, 0) ?? 0;
+
+  return (
+    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+      <div className="px-4 py-3 bg-zinc-50 dark:bg-zinc-900/40 flex items-center gap-2">
+        <Activity className="h-4 w-4 text-zinc-500" />
+        <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+          Cascade calibration
+        </div>
+        <div className="text-xs text-zinc-500 dark:text-zinc-400 flex-1">
+          {pairCount} pair{pairCount === 1 ? "" : "s"} ·{" "}
+          {totalSamples.toLocaleString()} samples ·{" "}
+          {fit
+            ? `R² ${fit.rSquared.toFixed(2)} · σ ${fit.residualStdDb.toFixed(1)} dB`
+            : "no fit yet"}
+        </div>
+      </div>
+      <div className="px-4 py-3 space-y-4">
+        {!data && (
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">Loading…</p>
+        )}
+        {data && pairCount === 0 && (
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+            No node-to-node samples yet. The cascade fits itself from
+            RSSI observations whenever one node hears another&apos;s
+            BLE broadcast — no user action required. Should populate
+            within a few minutes of MQTT activity.
+          </p>
+        )}
+        {fit && (
+          <>
+            {/* Layer 1 — global RF params */}
+            <div>
+              <div className="text-xs uppercase tracking-wide text-zinc-400 mb-1.5">
+                Layer 1: global RF parameters
+              </div>
+              <table className="w-full text-xs">
+                <thead className="text-xs uppercase tracking-wide text-zinc-400">
+                  <tr>
+                    <th className="text-left font-normal px-2 py-1">Param</th>
+                    <th className="text-right font-normal px-2 py-1">
+                      Configured
+                    </th>
+                    <th className="text-right font-normal px-2 py-1">
+                      Fitted
+                    </th>
+                    <th className="text-right font-normal px-2 py-1">Δ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {layer1Rows.map((r) => {
+                    const deltaCls =
+                      r.delta == null
+                        ? "text-zinc-500"
+                        : Math.abs(r.delta) < 0.1
+                          ? "text-zinc-500"
+                          : Math.abs(r.delta) < 0.5
+                            ? "text-amber-600 dark:text-amber-400"
+                            : "text-red-600 dark:text-red-400";
+                    return (
+                      <tr
+                        key={r.label}
+                        className="border-t border-zinc-100/60 dark:border-zinc-800/40"
+                      >
+                        <td className="px-2 py-1.5">{r.label}</td>
+                        <td className="px-2 py-1.5 text-right font-mono text-zinc-500">
+                          {r.configured?.toFixed(2)}
+                          {r.unit}
+                        </td>
+                        <td className="px-2 py-1.5 text-right font-mono text-zinc-900 dark:text-zinc-100">
+                          {r.fitted?.toFixed(2)}
+                          {r.unit}
+                        </td>
+                        <td
+                          className={`px-2 py-1.5 text-right font-mono ${deltaCls}`}
+                        >
+                          {r.delta == null
+                            ? "—"
+                            : `${r.delta >= 0 ? "+" : ""}${r.delta.toFixed(2)}`}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Layer 2 — per-node TX/RX offsets */}
+            <div>
+              <div className="text-xs uppercase tracking-wide text-zinc-400 mb-1.5">
+                Layer 2: per-node offsets
+                <span className="ml-2 normal-case tracking-normal text-zinc-400 dark:text-zinc-500 font-normal">
+                  · ref = {fit.referenceNodeId ?? "—"}
+                </span>
+              </div>
+              <table className="w-full text-xs">
+                <thead className="text-xs uppercase tracking-wide text-zinc-400">
+                  <tr>
+                    <th className="text-left font-normal px-2 py-1">Node</th>
+                    <th
+                      className="text-right font-normal px-2 py-1"
+                      title="TX offset: how this node's transmit power deviates from the reference. Positive = transmits hotter than the reference; negative = weaker."
+                    >
+                      TX offset
+                    </th>
+                    <th
+                      className="text-right font-normal px-2 py-1"
+                      title="RX offset: how this node's receive sensitivity deviates from the reference. Positive = sees signals as stronger than the reference would; negative = weaker."
+                    >
+                      RX offset
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {nodeRows.map((r) => {
+                    const offsetCls = (v: number): string =>
+                      Math.abs(v) < 1
+                        ? "text-zinc-500"
+                        : Math.abs(v) < 4
+                          ? "text-amber-600 dark:text-amber-400"
+                          : v < 0
+                            ? "text-red-600 dark:text-red-400"
+                            : "text-emerald-600 dark:text-emerald-400";
+                    return (
+                      <tr
+                        key={r.nodeId}
+                        className="border-t border-zinc-100/60 dark:border-zinc-800/40"
+                      >
+                        <td className="px-2 py-1.5 font-mono">
+                          {r.nodeId}
+                          {r.isReference && (
+                            <span
+                              className="ml-1.5 text-[10px] uppercase text-zinc-400"
+                              title="Reference node — its TX offset is anchored to 0 to break the gauge degree of freedom."
+                            >
+                              ref
+                            </span>
+                          )}
+                        </td>
+                        <td
+                          className={`px-2 py-1.5 text-right font-mono ${
+                            r.isReference ? "text-zinc-400" : offsetCls(r.txOffsetDb)
+                          }`}
+                        >
+                          {r.txOffsetDb >= 0 ? "+" : ""}
+                          {r.txOffsetDb.toFixed(2)} dB
+                        </td>
+                        <td
+                          className={`px-2 py-1.5 text-right font-mono ${offsetCls(r.rxOffsetDb)}`}
+                        >
+                          {r.rxOffsetDb >= 0 ? "+" : ""}
+                          {r.rxOffsetDb.toFixed(2)} dB
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Per-pair table — collapsible since it can be large. */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowPairs((v) => !v)}
+                className="w-full text-left text-xs uppercase tracking-wide text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 mb-1.5"
+              >
+                Per-pair residuals{" "}
+                <span className="normal-case tracking-normal">
+                  ({pairCount}) · {showPairs ? "hide" : "show"}
+                </span>
+              </button>
+              {showPairs && (
+                <div className="max-h-80 overflow-y-auto rounded border border-zinc-200 dark:border-zinc-800/80">
+                  <table className="w-full text-xs">
+                    <thead className="text-xs uppercase tracking-wide text-zinc-400 bg-zinc-50/60 dark:bg-zinc-900/30 sticky top-0">
+                      <tr>
+                        <th className="text-left font-normal px-2 py-1">
+                          TX → RX
+                        </th>
+                        <th className="text-right font-normal px-2 py-1">
+                          Dist
+                        </th>
+                        <th className="text-right font-normal px-2 py-1">
+                          Walls
+                        </th>
+                        <th className="text-right font-normal px-2 py-1">
+                          Mean RSSI
+                        </th>
+                        <th className="text-right font-normal px-2 py-1">σ</th>
+                        <th className="text-right font-normal px-2 py-1">
+                          Residual
+                        </th>
+                        <th className="text-right font-normal px-2 py-1">
+                          n
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data?.pairs.map((p) => {
+                        const wallsStr = `${p.walls.interior}/${p.walls.exterior}/${p.walls.doors}`;
+                        const residualCls =
+                          p.residualDb == null
+                            ? "text-zinc-500"
+                            : Math.abs(p.residualDb) < 3
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : Math.abs(p.residualDb) < 8
+                                ? "text-zinc-500"
+                                : "text-amber-600 dark:text-amber-400";
+                        return (
+                          <tr
+                            key={`${p.txId}|${p.rxId}`}
+                            className="border-t border-zinc-100/60 dark:border-zinc-800/40"
+                          >
+                            <td className="px-2 py-1 font-mono whitespace-nowrap">
+                              {p.txId} → {p.rxId}
+                            </td>
+                            <td className="px-2 py-1 text-right font-mono text-zinc-500">
+                              {p.trueDistM.toFixed(1)}m
+                            </td>
+                            <td
+                              className="px-2 py-1 text-right font-mono text-zinc-500"
+                              title="interior / exterior / doors"
+                            >
+                              {wallsStr}
+                            </td>
+                            <td className="px-2 py-1 text-right font-mono text-zinc-900 dark:text-zinc-100">
+                              {p.meanRssiDbm.toFixed(1)}
+                            </td>
+                            <td className="px-2 py-1 text-right font-mono text-zinc-500">
+                              ±{p.sigmaDb.toFixed(1)}
+                            </td>
+                            <td
+                              className={`px-2 py-1 text-right font-mono ${residualCls}`}
+                            >
+                              {p.residualDb == null
+                                ? "—"
+                                : `${p.residualDb >= 0 ? "+" : ""}${p.residualDb.toFixed(1)}`}
+                            </td>
+                            <td className="px-2 py-1 text-right font-mono text-zinc-500">
+                              {p.totalSamples}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <p className="text-[11px] text-zinc-400 leading-relaxed">
+              Phase 1 of the state-tracker rebuild — runs entirely in
+              parallel to existing positioning, no locator consumes it
+              yet. Watch fitted values stabilize and pair residuals
+              settle in 3–6 dB before promoting (see
+              <code className="mx-1 px-1 rounded bg-zinc-100 dark:bg-zinc-800/60 text-[10px]">
+                docs/state-tracker.md
+              </code>
+              for design + criteria).
             </p>
           </>
         )}

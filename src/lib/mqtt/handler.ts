@@ -9,7 +9,11 @@ import { getCurrentConfig } from "@/lib/config/current";
 import { buildLocator, computeDevicePosition } from "@/lib/locators";
 import { leaveOneOutResiduals } from "@/lib/locators/calibration";
 import { findRoom } from "@/lib/locators/room_aware";
-import { obstructionLossForPair } from "@/lib/map/rf_cache";
+import { accumulatePairRssiSample } from "@/lib/calibration/cascade";
+import {
+  obstructionCountsForPair,
+  obstructionLossForPair,
+} from "@/lib/map/rf_cache";
 import { publishPresence } from "@/lib/presence";
 import {
   getStore,
@@ -307,6 +311,10 @@ export function attachHandlers(client: MqttClient): void {
                 absorptionAtTime,
                 timestamp: Date.now(),
                 obstructionLossDb,
+                // Capture raw RSSI on every node-to-node sample.
+                // Was previously discarded — needed by the cascade
+                // calibration system (see docs/state-tracker.md).
+                rssi: normalized.rssi,
               };
               recordGroundTruthSample(store, match.nodeId, gtSample);
               // Online per-pair fit update: propagate this single
@@ -314,6 +322,30 @@ export function attachHandlers(client: MqttClient): void {
               // PathAware's correction reflects it within one MQTT
               // message round-trip, not the next 30 s batch cycle.
               updatePairFitFromSample(store, match.nodeId, gtSample);
+
+              // Cascade calibration (Phase 1, parallel-diagnostic):
+              // accumulate raw-RSSI residual stats per (TX, RX) pair
+              // for the periodic cascade fit. Skipped silently when
+              // RF geometry isn't available or RSSI is missing — the
+              // cascade tolerates partial data.
+              if (normalized.rssi != null) {
+                const counts = obstructionCountsForPair(
+                  match.nodeId,
+                  targetId,
+                  sourcePoint,
+                  targetPoint,
+                );
+                if (counts) {
+                  accumulatePairRssiSample(
+                    store,
+                    targetId, // TX
+                    match.nodeId, // RX (this node heard it)
+                    normalized.rssi,
+                    trueDist,
+                    counts,
+                  );
+                }
+              }
               // Don't fall through to device tracking — the user has these
               // excluded for a reason (they're not real devices to track).
               return;
@@ -395,6 +427,10 @@ export function attachHandlers(client: MqttClient): void {
               y: r.y,
               z: r.z,
               algorithm: r.algorithm,
+              candidates: r.candidates,
+              rings: r.rings,
+              contours: r.contours,
+              heatmap: r.heatmap,
             });
             if (r.algorithm === "bayesian") bayesianResult = r;
           }

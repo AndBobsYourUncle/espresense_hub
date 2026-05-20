@@ -2,6 +2,7 @@
 
 import type { LucideIcon } from "lucide-react";
 import {
+  Activity,
   GitCompareArrows,
   Layers,
   MapPin,
@@ -75,6 +76,15 @@ const TOOLS: ToolDef[] = [
       touch
         ? "Tap a node to see its predicted RF coverage across the floor — walls attenuate, doors pass signal through"
         : "Click a node to see its predicted RF coverage across the floor — walls attenuate, doors pass signal through",
+  },
+  {
+    tool: "cascade",
+    label: "Cascade",
+    icon: Activity,
+    hint: (touch) =>
+      touch
+        ? "View the cascade calibration — colored lines show how well each node-pair fits the model. Tap a node to see its predicted RF using fitted (not configured) parameters."
+        : "View the cascade calibration — colored lines show how well each node-pair fits the model. Click a node to see its predicted RF using fitted (not configured) parameters.",
   },
 ];
 

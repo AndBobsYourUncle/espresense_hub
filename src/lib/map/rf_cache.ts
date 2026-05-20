@@ -1,6 +1,10 @@
 import type { Config, Floor, Node, Room } from "@/lib/config";
 import { polygonCentroid } from "@/lib/map/geometry";
-import { buildWallSegments, type WallSegment } from "@/lib/map/rf_geometry";
+import {
+  buildWallSegments,
+  countCrossings,
+  type WallSegment,
+} from "@/lib/map/rf_geometry";
 import { obstructionLossDb, rfParamsFromConfig, type RfParams } from "@/lib/map/rf_propagation";
 import { findRoom } from "@/lib/locators/room_aware";
 
@@ -128,6 +132,13 @@ export function obstructionLossForPair(
   const walls = cache.wallsByFloor.get(lFloor);
   if (!walls) return 0;
   const txCentroid = cache.nodeRoomCentroid.get(transmitterId);
+  // Note: obstructionLossDb goes through a direct-to-endpoint path
+  // and uses only the TX centroid — same signature as before. Direct
+  // count symmetry (both endpoints' mount walls side-tested) is
+  // handled by obstructionCountsForPair below, which is what the
+  // cascade pipeline actually uses. Leaving this path as-is because
+  // its callers (older locators) don't depend on direction-
+  // independent counts.
   return obstructionLossDb(
     transmitterPoint[0],
     transmitterPoint[1],
@@ -136,6 +147,66 @@ export function obstructionLossForPair(
     walls,
     cache.params,
     txCentroid,
+  );
+}
+
+/**
+ * Room centroid for the given configured node, used by the routing
+ * graph's edge-wall-count step so walls that touch a node's mount
+ * point get properly side-tested (otherwise `countCrossings` silently
+ * skips them when no centroid is passed — bug that under-counts
+ * crossings for any node mounted on/near a wall).
+ *
+ * Returns null when the cache isn't built, the node isn't known, or
+ * the node's room has no polygon.
+ */
+export function getNodeRoomCentroid(
+  nodeId: string,
+): readonly [number, number] | null {
+  if (!cache) return null;
+  return cache.nodeRoomCentroid.get(nodeId) ?? null;
+}
+
+/**
+ * Same path-segment lookup as `obstructionLossForPair` but returns
+ * the raw counts (interior, exterior, doors) instead of the dB sum.
+ *
+ * Needed by the cascade calibration system, which fits per-wall-type
+ * attenuation as separate parameters and therefore needs the
+ * counts, not the sum. Returns null when geometry isn't available
+ * (cache not built, nodes on different floors, etc.); callers can
+ * treat that as "skip this observation."
+ */
+export function obstructionCountsForPair(
+  listenerId: string,
+  transmitterId: string,
+  listenerPoint: readonly [number, number, number],
+  transmitterPoint: readonly [number, number, number],
+): { interior: number; exterior: number; doors: number } | null {
+  if (!cache) return null;
+  const lFloor = cache.nodeFloor.get(listenerId);
+  const tFloor = cache.nodeFloor.get(transmitterId);
+  if (!lFloor || !tFloor || lFloor !== tFloor) return null;
+  const walls = cache.wallsByFloor.get(lFloor);
+  if (!walls) return null;
+  const txCentroid = cache.nodeRoomCentroid.get(transmitterId);
+  const rxCentroid = cache.nodeRoomCentroid.get(listenerId);
+  // Pass BOTH endpoint centroids so walls touching either endpoint
+  // get properly side-tested against that endpoint's room interior.
+  // This makes the count truly direction-independent: tx→rx and
+  // rx→tx produce identical `{interior, exterior, doors}` for the
+  // same physical line. Before the fix, only the TX centroid was
+  // consulted, so swapping endpoints gave different counts due to
+  // asymmetric at-source treatment of mount walls — surfaced
+  // visibly as `office→kitchen: 1i/2e` vs `kitchen→office: 2i/2e`.
+  return countCrossings(
+    transmitterPoint[0],
+    transmitterPoint[1],
+    listenerPoint[0],
+    listenerPoint[1],
+    walls,
+    txCentroid,
+    rxCentroid,
   );
 }
 

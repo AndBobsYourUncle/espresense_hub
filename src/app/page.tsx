@@ -1,5 +1,6 @@
 import PageHeader from "@/components/PageHeader";
 import CompareLegend from "@/components/map/CompareLegend";
+import DeviceFilter from "@/components/map/DeviceFilter";
 import GroupLegend from "@/components/map/GroupLegend";
 import DeviceDetailPanel from "@/components/map/DeviceDetailPanel";
 import DeviceSelectionProvider from "@/components/map/DeviceSelectionProvider";
@@ -128,6 +129,7 @@ export default async function MapPage() {
                             <MobileLandscapeChrome summary={summary} />
                           </div>
                           <CompareLegend />
+                          <DeviceFilter />
                           <GroupLegend floor={floor} />
                           <DeviceDetailPanel />
                           <NodeInspectionPanel nodes={floorNodes} />

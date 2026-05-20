@@ -6,6 +6,7 @@ import {
   setAutoApplyConfig,
 } from "@/lib/calibration/auto_apply";
 import { refreshNodePairFits } from "@/lib/calibration/autofit";
+import { fitCascade } from "@/lib/calibration/cascade";
 import { loadAuditState, saveAuditState } from "@/lib/state/audit_persistence";
 import {
   CALIBRATION_SAVE_INTERVAL_MS,
@@ -38,6 +39,16 @@ import { getStore, setPositionFilter } from "@/lib/state/store";
  */
 const PAIR_FITS_REFRESH_MS = 5 * 60_000;
 const PAIR_FITS_INITIAL_DELAY_MS = 5_000;
+
+/**
+ * Cascade-calibration refit cadence. Same scale as per-pair fits —
+ * cheap to compute (linear LS over O(N²) pair rows for N nodes),
+ * doesn't need to run faster than the per-pair stats accumulate
+ * meaningful new evidence.
+ */
+const CASCADE_REFIT_MS = 5 * 60_000;
+/** Initial cascade refit delay — give MQTT time to deliver some node-to-node samples. */
+const CASCADE_REFIT_INITIAL_DELAY_MS = 30_000;
 
 const globalForBootstrap = globalThis as unknown as {
   __espresenseBootstrapped?: boolean;
@@ -203,6 +214,21 @@ export async function bootstrap(): Promise<void> {
         console.error("[bootstrap] pair-fit refresh failed", err);
       }
     }, PAIR_FITS_REFRESH_MS);
+
+    // Cascade calibration refit — Phase 1 of the state-tracker
+    // rebuild. Pure parallel-diagnostic; nothing in the live
+    // positioning pipeline consumes this yet.
+    const runCascadeFit = (): void => {
+      try {
+        const config = getCurrentConfig();
+        const fit = fitCascade(store, config);
+        if (fit) store.latestCascadeFit = fit;
+      } catch (err) {
+        console.error("[bootstrap] cascade fit failed:", err);
+      }
+    };
+    setTimeout(runCascadeFit, CASCADE_REFIT_INITIAL_DELAY_MS);
+    setInterval(runCascadeFit, CASCADE_REFIT_MS);
 
     // Online absorption auto-apply: every interval, push small drift
     // corrections to firmware so calibration converges automatically.

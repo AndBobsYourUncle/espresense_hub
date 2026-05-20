@@ -119,6 +119,18 @@ export const RfSchema = z
      * doors as fully open).
      */
     door_attenuation_db: z.number().min(0).default(0.0),
+    /**
+     * Specular reflection loss in dB per bounce. Used by the
+     * cascade calibration's routing graph (see
+     * docs/state-tracker.md → D6/Phase 1.7) when signal takes a
+     * path that reflects off a wall to reach the receiver.
+     *
+     * Typical: 4–8 dB for indoor drywall reflections at 2.4 GHz.
+     * Lower (smoother surfaces, glass): more efficient reflection.
+     * Higher (carpet, furniture): more diffuse scattering, less
+     * coherent reflection.
+     */
+    reflection_loss_db: z.number().min(0).default(6.0),
   })
   .prefault({});
 

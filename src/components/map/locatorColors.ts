@@ -16,6 +16,7 @@ export const LOCATOR_COLORS: Record<string, string> = {
   environment_aware: "#2dd4bf", // teal-400 — forward-model BFGS
   rf_room_aware: "#84cc16", // lime-500 — RF-weighted topology
   rf_physics: "#ec4899", // pink-500 — physics-driven (dB-space objective)
+  cascade: "#eab308", // yellow-500 — cascade-calibrated particle locator
   upstream_companion: "#64748b", // slate-500 — neutral, signals "external reference"
 };
 
@@ -31,6 +32,7 @@ export const LOCATOR_LABELS: Record<string, string> = {
   environment_aware: "Env-Aware",
   rf_room_aware: "RF Room-Aware",
   rf_physics: "RF Physics",
+  cascade: "Cascade",
   upstream_companion: "ESP-Companion",
 };
 

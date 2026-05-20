@@ -17,6 +17,7 @@ const PRIMARY_LOCATORS = new Set([
   "bayesian",
   "rf_room_aware",
   "rf_physics",
+  "cascade",
 ]);
 
 const DEBUG_LOCATORS = [
@@ -76,6 +77,9 @@ export default function CompareLegend() {
   }
   if (live.liveKeys.has("rf_physics")) {
     primaryEntries.push(buildEntry("rf_physics"));
+  }
+  if (live.liveKeys.has("cascade")) {
+    primaryEntries.push(buildEntry("cascade"));
   }
   if (live.liveKeys.has("bayesian")) {
     primaryEntries.push(buildEntry("bayesian"));

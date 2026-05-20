@@ -11,6 +11,15 @@ export interface RfParams {
   wallAttenuationDb: number;
   exteriorWallAttenuationDb: number;
   doorAttenuationDb: number;
+  /**
+   * Specular reflection loss in dB per bounce. Used by the routing
+   * graph (Phase 1.7) when the cascade chooses a path that involves
+   * reflecting off a wall surface to reach the receiver. Default 6 dB
+   * — typical for indoor BLE-grade reflections off drywall; harder
+   * surfaces (concrete, glass) reflect more efficiently and would
+   * fit lower; soft/scattering surfaces fit higher.
+   */
+  reflectionLossDb: number;
 }
 
 /** Convenience: pull the RF params out of a live Config. */
@@ -21,6 +30,7 @@ export function rfParamsFromConfig(config: Config): RfParams {
     wallAttenuationDb: config.rf.wall_attenuation_db,
     exteriorWallAttenuationDb: config.rf.exterior_wall_attenuation_db,
     doorAttenuationDb: config.rf.door_attenuation_db,
+    reflectionLossDb: config.rf.reflection_loss_db,
   };
 }
 

@@ -1,5 +1,9 @@
 import type { NodePairFit, PairStats } from "@/lib/calibration/autofit";
 import type {
+  CascadeFit,
+  PairRssiStats,
+} from "@/lib/calibration/cascade";
+import type {
   NodeTelemetry,
   NormalizedMeasurement,
 } from "@/lib/mqtt/messages";
@@ -61,6 +65,18 @@ export interface AlternativePosition {
   y: number;
   z: number;
   algorithm: string;
+  /** Optional particle cloud for particle-based locators. See `LocatorResult.candidates`. */
+  candidates?: ReadonlyArray<readonly [number, number]>;
+  /** Optional per-observation rings (cx, cy, r). See `LocatorResult.rings`. */
+  rings?: ReadonlyArray<readonly [number, number, number]>;
+  /** Optional per-observation iso-RSSI contours grouped by node. */
+  contours?: ReadonlyArray<{
+    nodeId: string;
+    points: ReadonlyArray<readonly [number, number]>;
+    residualDb?: number;
+  }>;
+  /** Sparse density heatmap [x, y, density]. See LocatorResult.heatmap. */
+  heatmap?: ReadonlyArray<readonly [number, number, number]>;
 }
 
 export interface DevicePosition {
@@ -197,6 +213,16 @@ export interface GroundTruthSample {
    * as 0, making the fit fall back to the pre-RF-aware behavior.
    */
   obstructionLossDb?: number;
+  /**
+   * Raw RSSI in dBm as reported by firmware (before its absorption-
+   * based distance conversion). Primary input for the cascade
+   * calibration system (state-tracker rebuild, see
+   * docs/state-tracker.md). Optional for back-compat: samples
+   * recorded before this field existed, or from firmware versions
+   * that don't emit RSSI, are still usable for the legacy
+   * distance-based calibration path.
+   */
+  rssi?: number;
 }
 
 const GT_SAMPLES_PER_NODE = 1000;
@@ -336,6 +362,24 @@ export class Store {
    * Seeded on bootstrap from the ring buffer.
    */
   readonly nodePairFitStats = new Map<string, Map<string, PairStats>>();
+  /**
+   * Cascade-calibration RSSI residual stats per (transmitter,
+   * listener) node pair. Updated on every node-to-node observation
+   * in raw RSSI dB-space. Feeds the periodic cascade fit (Layer 1
+   * global RF params + Layer 2 per-node TX/RX offsets). Phase 1 of
+   * the state-tracker rebuild — runs in parallel with existing
+   * calibration; no locator consumes it yet.
+   *
+   * Outer key = transmitter id, inner key = listener id.
+   * See src/lib/calibration/cascade.ts for the math + update logic.
+   */
+  readonly pairRssiStats = new Map<string, Map<string, PairRssiStats>>();
+  /**
+   * Latest cascade-fit result, recomputed periodically from
+   * `pairRssiStats`. Read by the inspector API + UI panel. Null
+   * before the first successful fit.
+   */
+  latestCascadeFit: CascadeFit | null = null;
   /**
    * User-placed ground-truth pins per device. Each pin is a snapshot
    * "device was here, with these measurements." Multiple pins per

@@ -250,22 +250,96 @@ export function countCrossings(
   ty: number,
   walls: readonly WallSegment[],
   sourceRoomCentroid?: readonly [number, number],
+  targetRoomCentroid?: readonly [number, number],
 ): { interior: number; exterior: number; doors: number } {
-  const hits: Array<{ lineT: number; opening: boolean; exterior: boolean }> = [];
-  for (const seg of walls) {
+  const d = countCrossingsDetailed(
+    fx,
+    fy,
+    tx,
+    ty,
+    walls,
+    sourceRoomCentroid,
+    targetRoomCentroid,
+  );
+  return { interior: d.interior, exterior: d.exterior, doors: d.doors };
+}
+
+/** A single (possibly merged) wall crossing between two points. */
+export interface CrossingEvent {
+  /** Position along the source→target line, 0..1. */
+  lineT: number;
+  /** Classification after merge: door beats exterior beats interior. */
+  type: "interior" | "exterior" | "door";
+  /**
+   * Indices (into the `walls` array passed to the function) of every
+   * wall segment that contributed to this crossing. When multiple
+   * polygon edges overlap at the same physical wall, they collapse
+   * into one crossing but all their indices are reported so a
+   * caller highlighting "the walls I crossed" can show every
+   * contributing segment.
+   */
+  segmentIndices: number[];
+}
+
+/**
+ * Same crossing logic as `countCrossings`, but also returns the
+ * underlying wall-segment indices per crossing event. Meant for
+ * debug/visualization — e.g. "show me which walls the cascade
+ * thinks are between these two nodes." `countCrossings` delegates
+ * here and drops the detail, so this is the single source of truth.
+ */
+export function countCrossingsDetailed(
+  fx: number,
+  fy: number,
+  tx: number,
+  ty: number,
+  walls: readonly WallSegment[],
+  sourceRoomCentroid?: readonly [number, number],
+  targetRoomCentroid?: readonly [number, number],
+): {
+  interior: number;
+  exterior: number;
+  doors: number;
+  crossings: CrossingEvent[];
+} {
+  const hits: Array<{
+    lineT: number;
+    opening: boolean;
+    exterior: boolean;
+    idx: number;
+  }> = [];
+  const epsSq = WALL_AT_SOURCE_EPSILON * WALL_AT_SOURCE_EPSILON;
+  for (let idx = 0; idx < walls.length; idx++) {
+    const seg = walls[idx];
+    // A wall is "at an endpoint" if it touches either the source or
+    // the target within epsilon. Each endpoint's own centroid drives
+    // the side-test for walls touching that endpoint — so a wall
+    // mounted near the source is evaluated against the source's
+    // room interior, and a wall mounted near the target is evaluated
+    // against the target's room interior. Without the target-side
+    // check, running the same geometry in reverse (swap source and
+    // target) produces different counts because the formerly-target
+    // wall becomes at-source and gets side-tested while the formerly-
+    // source wall becomes far-from-source and is unconditionally
+    // counted via segment intersection. Treating both endpoints
+    // symmetrically makes the count truly direction-independent.
     const atSource =
-      pointToSegmentDistSq(fx, fy, seg.a, seg.b) <
-      WALL_AT_SOURCE_EPSILON * WALL_AT_SOURCE_EPSILON;
+      pointToSegmentDistSq(fx, fy, seg.a, seg.b) < epsSq;
+    const atTarget =
+      pointToSegmentDistSq(tx, ty, seg.a, seg.b) < epsSq;
     if (atSource) {
       if (!sourceRoomCentroid) continue;
-      // Side test: is the target on the same side of the wall line as
-      // the room's centroid? Cross product of wall vector × (point −
-      // wall-a) gives a signed area whose sign tells us which side of
-      // the line the point lies on. Same sign → same side → skip.
       const side =
         sidednessSign(sourceRoomCentroid[0], sourceRoomCentroid[1], seg.a, seg.b) *
         sidednessSign(tx, ty, seg.a, seg.b);
-      if (side >= 0) continue; // same side (or target on the line itself)
+      if (side >= 0) continue;
+    }
+    if (atTarget) {
+      if (!targetRoomCentroid) continue;
+      const side =
+        sidednessSign(targetRoomCentroid[0], targetRoomCentroid[1], seg.a, seg.b) *
+        sidednessSign(fx, fy, seg.a, seg.b);
+      if (side >= 0) continue;
     }
     const hit = segmentIntersection(fx, fy, tx, ty, seg.a, seg.b);
     if (!hit) continue;
@@ -276,42 +350,44 @@ export function countCrossings(
       lineT: hit.lineT,
       opening: inOpening,
       exterior: seg.isExterior,
+      idx,
     });
   }
-  // Collapse hits at the same point along the line (shared walls that
-  // show up as multiple polygon edges). Merging rules when multiple
-  // segments coincide at the same crossing:
-  //
-  //   - If any has an opening (door) at that point → counts as a door.
-  //   - Else if any is exterior → counts as exterior.
-  //   - Else → interior.
-  //
-  // The "any-opening" rule means a declared door on one side of a
-  // shared wall correctly converts the crossing to a door even if the
-  // other side's polygon edge doesn't also declare one.
   hits.sort((a, b) => a.lineT - b.lineT);
   let interior = 0;
   let exterior = 0;
   let doors = 0;
+  const crossings: CrossingEvent[] = [];
   let i = 0;
   while (i < hits.length) {
     let j = i + 1;
     let anyOpening = hits[i].opening;
     let anyExterior = hits[i].exterior;
+    const indices = [hits[i].idx];
     while (
       j < hits.length &&
       hits[j].lineT - hits[i].lineT < CROSSING_MERGE_EPSILON
     ) {
       if (hits[j].opening) anyOpening = true;
       if (hits[j].exterior) anyExterior = true;
+      indices.push(hits[j].idx);
       j++;
     }
-    if (anyOpening) doors++;
-    else if (anyExterior) exterior++;
-    else interior++;
+    let type: CrossingEvent["type"];
+    if (anyOpening) {
+      doors++;
+      type = "door";
+    } else if (anyExterior) {
+      exterior++;
+      type = "exterior";
+    } else {
+      interior++;
+      type = "interior";
+    }
+    crossings.push({ lineT: hits[i].lineT, type, segmentIndices: indices });
     i = j;
   }
-  return { interior, exterior, doors };
+  return { interior, exterior, doors, crossings };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────

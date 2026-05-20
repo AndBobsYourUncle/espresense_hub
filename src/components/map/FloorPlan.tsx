@@ -16,6 +16,7 @@ import DeviceMarkers from "./DeviceMarkers";
 import NodeDebugOverlay from "./NodeDebugOverlay";
 import NodeMarkers, { type NodeMarkerData } from "./NodeMarkers";
 import PinOverlay from "./PinOverlay";
+import CascadeOverlay from "./CascadeOverlay";
 import RfPropagationOverlay from "./RfPropagationOverlay";
 import RoomOverlay from "./RoomOverlay";
 import WallSelectionOverlay from "./WallSelectionOverlay";
@@ -175,7 +176,21 @@ export default function FloorPlan({ config, floor }: Props) {
           wallAttenuationDb: config.rf.wall_attenuation_db,
           exteriorWallAttenuationDb: config.rf.exterior_wall_attenuation_db,
           doorAttenuationDb: config.rf.door_attenuation_db,
+          reflectionLossDb: config.rf.reflection_loss_db,
         }}
+      />
+
+      {/* Cascade calibration overlay — pair residual graph + fitted-
+          params heatmap. Only visible when the cascade tool is active. */}
+      <CascadeOverlay
+        floor={floor}
+        transform={transform}
+        nodes={config.nodes
+          .filter(
+            (n): n is typeof n & { id: string; point: readonly [number, number, number] } =>
+              Boolean(n.id && n.point),
+          )
+          .map((n) => ({ id: n.id, point: n.point, room: n.room }))}
       />
 
       {/* Room overlay — activates in room-relations and presence-zones modes */}
